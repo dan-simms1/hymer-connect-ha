@@ -1,0 +1,59 @@
+{
+  "_comment": "Synthetic runtime metadata fixture used by the unit test suite.",
+  "summary": {
+    "canonical_capability_count": 3,
+    "rich_template_entry_count": 8,
+    "generic_component_kind_count": 4,
+    "support_tier_counts": {
+      "canonical": 3,
+      "generic_runtime": 4,
+      "rich_template": 8
+    },
+    "read_validation_status_counts": {
+      "inferred": 15
+    },
+    "write_validation_status_counts": {
+      "not_applicable": 2,
+      "runtime_path_only": 13
+    }
+  },
+  "canonical_capabilities": [
+    {
+      "key": "fresh_water_level",
+      "platform": "sensor",
+      "read_validation_status": "inferred",
+      "write_validation_status": "not_applicable",
+      "evidence_sources": ["registry", "bundle"]
+    },
+    {
+      "key": "main_switch",
+      "platform": "switch",
+      "read_validation_status": "inferred",
+      "write_validation_status": "runtime_path_only",
+      "evidence_sources": ["registry", "bundle"]
+    },
+    {
+      "key": "available_capacity",
+      "platform": "sensor",
+      "read_validation_status": "inferred",
+      "write_validation_status": "not_applicable",
+      "evidence_sources": ["registry", "bundle"]
+    }
+  ],
+  "rich_templates": [
+    {"key": "light", "read_validation_status": "inferred", "write_validation_status": "runtime_path_only"},
+    {"key": "fridge_mode", "read_validation_status": "inferred", "write_validation_status": "runtime_path_only"},
+    {"key": "fan", "read_validation_status": "inferred", "write_validation_status": "runtime_path_only"},
+    {"key": "awning", "read_validation_status": "inferred", "write_validation_status": "runtime_path_only"},
+    {"key": "boiler_mode", "read_validation_status": "inferred", "write_validation_status": "runtime_path_only"},
+    {"key": "heater_energy", "read_validation_status": "inferred", "write_validation_status": "runtime_path_only"},
+    {"key": "air_conditioner", "read_validation_status": "inferred", "write_validation_status": "runtime_path_only"},
+    {"key": "climate", "read_validation_status": "inferred", "write_validation_status": "runtime_path_only"}
+  ],
+  "generic_component_kinds": [
+    {"kind": "chassis", "read_validation_status": "inferred", "write_validation_status": "not_applicable"},
+    {"kind": "gps", "read_validation_status": "inferred", "write_validation_status": "not_applicable"},
+    {"kind": "climate_control", "read_validation_status": "inferred", "write_validation_status": "runtime_path_only"},
+    {"kind": "battery_monitor", "read_validation_status": "inferred", "write_validation_status": "not_applicable"}
+  ]
+}

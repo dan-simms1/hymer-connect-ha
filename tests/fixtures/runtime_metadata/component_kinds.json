@@ -1,0 +1,22 @@
+{
+  "_comment": "Synthetic runtime metadata fixture used by the unit test suite.",
+  "components": {
+    "1": {"kind": "chassis", "name": "Chassis Signals"},
+    "2": {"kind": "habitation_controller", "name": "Habitation Controller 2"},
+    "3": {"kind": "habitation_controller", "name": "Habitation Controller 3"},
+    "5": {"kind": "climate_control", "name": "Climate Calibration"},
+    "6": {"kind": "truma_heater", "name": "Truma Heater"},
+    "7": {"kind": "air_conditioner", "name": "Air Conditioner"},
+    "12": {"kind": "light", "name": "Lighting Zone"},
+    "30": {"kind": "gps", "name": "GPS Module"},
+    "34": {"kind": "fridge", "name": "Fridge"},
+    "56": {"kind": "toilet", "name": "Toilet Module"},
+    "95": {"kind": "air_conditioner", "name": "Airxcel Climate"},
+    "96": {"kind": "battery_controller", "name": "Battery Warning Module"},
+    "99": {"kind": "battery_monitor", "name": "Battery Monitor"},
+    "105": {"kind": "battery_monitor", "name": "Battery Monitor Advanced"},
+    "107": {"kind": "awning", "name": "Awning"},
+    "119": {"kind": "heater_neo", "name": "Air Heater Neo"},
+    "121": {"kind": "power_converter", "name": "Power Converter"}
+  }
+}

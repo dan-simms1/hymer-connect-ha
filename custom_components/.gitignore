@@ -1,0 +1,13 @@
+*.bak
+*.pyc
+__pycache__/
+.venv/
+logs/
+*.flow
+*.docx
+.env
+test_*.py
+*_data.json
+*_on.json
+sensor_dump.json
+.memory-bank/

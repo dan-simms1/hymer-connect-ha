@@ -1,0 +1,10 @@
+{
+  "_comment": "Synthetic runtime metadata fixture used by the unit test suite.",
+  "models": {
+    "HY_TEST_VAN": {
+      "brand": "hymer",
+      "name": "Test Van",
+      "group": "Integrated"
+    }
+  }
+}

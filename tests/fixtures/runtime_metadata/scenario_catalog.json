@@ -1,0 +1,27 @@
+{
+  "_comment": "Synthetic runtime metadata fixture used by the unit test suite.",
+  "brands": ["hymer"],
+  "entries": [
+    {
+      "id": 1,
+      "kind": "scene",
+      "key": "ARRIVAL",
+      "name": "Arrival",
+      "icon": "arrival",
+      "actions": [
+        {"component_id": 107, "sensor_id": 1, "value": true}
+      ]
+    },
+    {
+      "id": 2,
+      "kind": "scenario",
+      "key": "GOOD_MORNING",
+      "name": "Good Morning",
+      "icon": "good_morning",
+      "actions": [
+        {"component_id": 6, "sensor_id": 8, "value": 22},
+        {"component_id": 34, "sensor_id": 3, "value": 3}
+      ]
+    }
+  ]
+}

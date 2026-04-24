@@ -1,0 +1,629 @@
+{
+  "_comment": "Canonical provider metadata used by the integration to map observed component families to stable Home Assistant capabilities.",
+  "defaults": {
+    "read_validation_status": "inferred",
+    "write_validation_status": "not_applicable",
+    "evidence_sources": [
+      "registry",
+      "bundle"
+    ]
+  },
+  "capabilities": [
+    {
+      "key": "fresh_water_level",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 3, "sensor_id": 8},
+        {"component_id": 2, "sensor_id": 8},
+        {"component_id": 110, "sensor_id": 6},
+        {"component_id": 122, "sensor_id": 5},
+        {"component_id": 126, "sensor_id": 11},
+        {"component_id": 56, "sensor_id": 11},
+        {"component_id": 91, "sensor_id": 1},
+        {"component_id": 53, "sensor_id": 1},
+        {"component_id": 87, "sensor_id": 1}
+      ],
+      "unit": "%",
+      "icon": "mdi:water-percent"
+    },
+    {
+      "key": "waste_water_level",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 3, "sensor_id": 9},
+        {"component_id": 2, "sensor_id": 9},
+        {"component_id": 110, "sensor_id": 7},
+        {"component_id": 122, "sensor_id": 6},
+        {"component_id": 126, "sensor_id": 12},
+        {"component_id": 56, "sensor_id": 9},
+        {"component_id": 91, "sensor_id": 3},
+        {"component_id": 53, "sensor_id": 2},
+        {"component_id": 87, "sensor_id": 2}
+      ],
+      "unit": "%",
+      "icon": "mdi:water-percent"
+    },
+    {
+      "key": "black_water_level",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 56, "sensor_id": 10},
+        {"component_id": 127, "sensor_id": 1},
+        {"component_id": 91, "sensor_id": 2},
+        {"component_id": 35, "sensor_id": 1}
+      ],
+      "unit": "%",
+      "icon": "mdi:water-percent"
+    },
+    {
+      "key": "grey_cartridge_level",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 56, "sensor_id": 12}
+      ],
+      "unit": "%",
+      "icon": "mdi:car-back"
+    },
+    {
+      "key": "flush_cartridge_level",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 56, "sensor_id": 13}
+      ],
+      "unit": "%",
+      "icon": "mdi:water-sync"
+    },
+    {
+      "key": "black_cartridge_level",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 56, "sensor_id": 14}
+      ],
+      "unit": "%",
+      "icon": "mdi:delete"
+    },
+    {
+      "key": "flush_tank_available",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 56, "sensor_id": 1}
+      ],
+      "icon": "mdi:water-check"
+    },
+    {
+      "key": "tank_unit_available",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 56, "sensor_id": 2}
+      ],
+      "icon": "mdi:water-boiler"
+    },
+    {
+      "key": "cartridge_unit_available",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 56, "sensor_id": 3}
+      ],
+      "icon": "mdi:car-shift-pattern"
+    },
+    {
+      "key": "pulsing_flush_status",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 56, "sensor_id": 7}
+      ],
+      "icon": "mdi:water-pump"
+    },
+    {
+      "key": "reuse_grey_water_status",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 56, "sensor_id": 8}
+      ],
+      "icon": "mdi:recycle-variant"
+    },
+    {
+      "key": "external_bluetooth_device_connected",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 56, "sensor_id": 15}
+      ],
+      "icon": "mdi:bluetooth-connect",
+      "binary_device_class": "connectivity"
+    },
+    {
+      "key": "living_battery_voltage",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 3, "sensor_id": 5},
+        {"component_id": 2, "sensor_id": 5},
+        {"component_id": 110, "sensor_id": 4},
+        {"component_id": 122, "sensor_id": 3},
+        {"component_id": 126, "sensor_id": 8},
+        {"component_id": 99, "sensor_id": 1},
+        {"component_id": 105, "sensor_id": 13},
+        {"component_id": 111, "sensor_id": 1},
+        {"component_id": 97, "sensor_id": 3}
+      ],
+      "unit": "V",
+      "icon": "mdi:battery",
+      "sensor_device_class": "voltage"
+    },
+    {
+      "key": "living_battery_current",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 3, "sensor_id": 6},
+        {"component_id": 2, "sensor_id": 6},
+        {"component_id": 126, "sensor_id": 9},
+        {"component_id": 99, "sensor_id": 2},
+        {"component_id": 105, "sensor_id": 12},
+        {"component_id": 111, "sensor_id": 2},
+        {"component_id": 97, "sensor_id": 4}
+      ],
+      "unit": "A",
+      "icon": "mdi:current-dc",
+      "sensor_device_class": "current"
+    },
+    {
+      "key": "battery_soc",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 99, "sensor_id": 4},
+        {"component_id": 105, "sensor_id": 17},
+        {"component_id": 111, "sensor_id": 4},
+        {"component_id": 97, "sensor_id": 5}
+      ],
+      "unit": "%",
+      "icon": "mdi:battery-high",
+      "sensor_device_class": "battery"
+    },
+    {
+      "key": "battery_temperature",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 99, "sensor_id": 3},
+        {"component_id": 105, "sensor_id": 14},
+        {"component_id": 111, "sensor_id": 3}
+      ],
+      "unit": "°C",
+      "icon": "mdi:battery-heart-variant",
+      "sensor_device_class": "temperature"
+    },
+    {
+      "key": "battery_state_of_health",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 99, "sensor_id": 6},
+        {"component_id": 105, "sensor_id": 18}
+      ],
+      "unit": "%",
+      "icon": "mdi:battery-check",
+      "sensor_device_class": "battery"
+    },
+    {
+      "key": "battery_time_remaining",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 99, "sensor_id": 5},
+        {"component_id": 105, "sensor_id": 39}
+      ],
+      "unit": "min",
+      "icon": "mdi:battery-clock"
+    },
+    {
+      "key": "battery_capacity_remaining",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 99, "sensor_id": 7}
+      ],
+      "unit": "Ah",
+      "icon": "mdi:battery-sync"
+    },
+    {
+      "key": "battery_relative_capacity",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 99, "sensor_id": 8}
+      ],
+      "unit": "%",
+      "icon": "mdi:battery-medium",
+      "sensor_device_class": "battery"
+    },
+    {
+      "key": "available_capacity",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 105, "sensor_id": 22}
+      ],
+      "unit": "Ah",
+      "icon": "mdi:battery-plus-outline"
+    },
+    {
+      "key": "dischargeable_capacity",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 105, "sensor_id": 23}
+      ],
+      "unit": "Ah",
+      "icon": "mdi:battery-minus-outline"
+    },
+    {
+      "key": "nominal_capacity",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 105, "sensor_id": 24}
+      ],
+      "unit": "Ah",
+      "icon": "mdi:battery-outline"
+    },
+    {
+      "key": "battery_low_voltage",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 105, "sensor_id": 2}
+      ],
+      "icon": "mdi:battery-alert-variant-outline",
+      "binary_device_class": "problem"
+    },
+    {
+      "key": "battery_defect",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 105, "sensor_id": 6}
+      ],
+      "icon": "mdi:battery-off-outline",
+      "binary_device_class": "problem"
+    },
+    {
+      "key": "battery_charge_detected",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 99, "sensor_id": 9}
+      ],
+      "icon": "mdi:battery-charging",
+      "binary_device_class": "battery_charging"
+    },
+    {
+      "key": "charger_current",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 12},
+        {"component_id": 126, "sensor_id": 10}
+      ],
+      "unit": "A",
+      "icon": "mdi:battery-charging-medium",
+      "sensor_device_class": "current"
+    },
+    {
+      "key": "solar_voltage",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 8, "sensor_id": 2},
+        {"component_id": 117, "sensor_id": 2},
+        {"component_id": 97, "sensor_id": 9}
+      ],
+      "unit": "V",
+      "icon": "mdi:solar-power",
+      "sensor_device_class": "voltage"
+    },
+    {
+      "key": "solar_current",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 8, "sensor_id": 3},
+        {"component_id": 117, "sensor_id": 3},
+        {"component_id": 97, "sensor_id": 10}
+      ],
+      "unit": "A",
+      "icon": "mdi:current-dc",
+      "sensor_device_class": "current"
+    },
+    {
+      "key": "solar_panel_power",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 8, "sensor_id": 7},
+        {"component_id": 97, "sensor_id": 7}
+      ],
+      "unit": "W",
+      "icon": "mdi:solar-power-variant",
+      "sensor_device_class": "power"
+    },
+    {
+      "key": "lpg_level",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 91, "sensor_id": 4},
+        {"component_id": 97, "sensor_id": 1}
+      ],
+      "unit": "%",
+      "icon": "mdi:gas-cylinder"
+    },
+    {
+      "key": "second_lpg_level",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 91, "sensor_id": 8},
+        {"component_id": 97, "sensor_id": 2}
+      ],
+      "unit": "%",
+      "icon": "mdi:gas-cylinder"
+    },
+    {
+      "key": "starter_battery_voltage",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 3, "sensor_id": 7},
+        {"component_id": 2, "sensor_id": 7},
+        {"component_id": 110, "sensor_id": 5},
+        {"component_id": 122, "sensor_id": 4},
+        {"component_id": 126, "sensor_id": 7}
+      ],
+      "unit": "V",
+      "icon": "mdi:car-battery",
+      "sensor_device_class": "voltage"
+    },
+    {
+      "key": "shoreline_connected",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 3, "sensor_id": 22},
+        {"component_id": 2, "sensor_id": 14},
+        {"component_id": 110, "sensor_id": 12},
+        {"component_id": 122, "sensor_id": 11},
+        {"component_id": 126, "sensor_id": 1},
+        {"component_id": 30, "sensor_id": 13},
+        {"component_id": 58, "sensor_id": 13},
+        {"component_id": 57, "sensor_id": 13},
+        {"component_id": 31, "sensor_id": 13},
+        {"component_id": 6, "sensor_id": 13}
+      ],
+      "binary_device_class": "plug"
+    },
+    {
+      "key": "solar_active",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 8, "sensor_id": 1},
+        {"component_id": 117, "sensor_id": 1},
+        {"component_id": 97, "sensor_id": 8}
+      ],
+      "icon": "mdi:solar-power"
+    },
+    {
+      "key": "solar_reduced_power",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 8, "sensor_id": 5}
+      ],
+      "icon": "mdi:solar-power-variant-outline",
+      "binary_device_class": "problem"
+    },
+    {
+      "key": "solar_aes_active",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 8, "sensor_id": 6}
+      ],
+      "icon": "mdi:solar-power-variant"
+    },
+    {
+      "key": "battery_low_warning",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 96, "sensor_id": 3}
+      ],
+      "icon": "mdi:battery-alert",
+      "binary_device_class": "problem"
+    },
+    {
+      "key": "water_pump",
+      "platform": "switch",
+      "write_validation_status": "runtime_path_only",
+      "candidates": [
+        {"component_id": 3, "sensor_id": 3, "write_style": "bool"},
+        {"component_id": 2, "sensor_id": 3, "write_style": "bool"},
+        {"component_id": 110, "sensor_id": 3, "write_style": "bool"},
+        {"component_id": 98, "sensor_id": 10, "write_style": "bool"}
+      ],
+      "icon": "mdi:water-pump"
+    },
+    {
+      "key": "main_switch",
+      "platform": "switch",
+      "write_validation_status": "runtime_path_only",
+      "candidates": [
+        {"component_id": 3, "sensor_id": 1, "write_style": "string_on_off"},
+        {"component_id": 2, "sensor_id": 1, "write_style": "string_on_off"},
+        {"component_id": 110, "sensor_id": 1, "write_style": "string_on_off"},
+        {"component_id": 122, "sensor_id": 1, "write_style": "string_on_off"}
+      ],
+      "icon": "mdi:power"
+    },
+    {
+      "key": "inverter_enabled",
+      "platform": "switch",
+      "write_validation_status": "runtime_path_only",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 1, "write_style": "bool"},
+        {"component_id": 92, "sensor_id": 1, "write_style": "bool"},
+        {"component_id": 88, "sensor_id": 1, "write_style": "bool"}
+      ],
+      "icon": "mdi:power-plug"
+    },
+    {
+      "key": "charger_enabled",
+      "platform": "switch",
+      "write_validation_status": "runtime_path_only",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 9, "write_style": "bool"}
+      ],
+      "icon": "mdi:battery-charging"
+    },
+    {
+      "key": "charger_state",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 10}
+      ]
+    },
+    {
+      "key": "charge_voltage",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 11}
+      ],
+      "unit": "V",
+      "sensor_device_class": "voltage"
+    },
+    {
+      "key": "charger_input_voltage",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 15}
+      ],
+      "unit": "V",
+      "sensor_device_class": "voltage"
+    },
+    {
+      "key": "charger_input_current",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 16}
+      ],
+      "unit": "A",
+      "sensor_device_class": "current"
+    },
+    {
+      "key": "charger_input_frequency",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 17}
+      ],
+      "unit": "Hz",
+      "sensor_device_class": "frequency"
+    },
+    {
+      "key": "inverter_state",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 2}
+      ]
+    },
+    {
+      "key": "inverter_l_1_voltage",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 3}
+      ],
+      "unit": "V",
+      "sensor_device_class": "voltage"
+    },
+    {
+      "key": "inverter_l_1_current",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 4}
+      ],
+      "unit": "A",
+      "sensor_device_class": "current"
+    },
+    {
+      "key": "inverter_l_1_frequency",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 5}
+      ],
+      "unit": "Hz",
+      "sensor_device_class": "frequency"
+    },
+    {
+      "key": "inverter_l_2_voltage",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 6}
+      ],
+      "unit": "V",
+      "sensor_device_class": "voltage"
+    },
+    {
+      "key": "inverter_l_2_current",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 7}
+      ],
+      "unit": "A",
+      "sensor_device_class": "current"
+    },
+    {
+      "key": "inverter_l_2_frequency",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 121, "sensor_id": 8}
+      ],
+      "unit": "Hz",
+      "sensor_device_class": "frequency"
+    },
+    {
+      "key": "scu_voltage",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 30, "sensor_id": 5}
+      ],
+      "unit": "V",
+      "icon": "mdi:car-electric",
+      "sensor_device_class": "voltage"
+    },
+    {
+      "key": "lte_connection_state",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 30, "sensor_id": 4}
+      ],
+      "icon": "mdi:signal",
+      "binary_device_class": "connectivity"
+    },
+    {
+      "key": "vehicle_movement",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 30, "sensor_id": 14}
+      ],
+      "icon": "mdi:car-side",
+      "binary_device_class": "motion"
+    },
+    {
+      "key": "battery_cutoff_switch",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 30, "sensor_id": 8}
+      ],
+      "icon": "mdi:battery-off-outline"
+    },
+    {
+      "key": "fresh_water_sensor_failure",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 3, "sensor_id": 12},
+        {"component_id": 2, "sensor_id": 12},
+        {"component_id": 110, "sensor_id": 8},
+        {"component_id": 122, "sensor_id": 7}
+      ],
+      "icon": "mdi:water-alert",
+      "binary_device_class": "problem"
+    },
+    {
+      "key": "waste_water_sensor_failure",
+      "platform": "binary_sensor",
+      "candidates": [
+        {"component_id": 3, "sensor_id": 13},
+        {"component_id": 2, "sensor_id": 13},
+        {"component_id": 110, "sensor_id": 9},
+        {"component_id": 122, "sensor_id": 8}
+      ],
+      "icon": "mdi:water-alert",
+      "binary_device_class": "problem"
+    }
+  ]
+}
