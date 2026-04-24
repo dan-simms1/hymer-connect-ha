@@ -1,0 +1,36 @@
+{
+  "_comment": "Committed replay fixtures for decoder and canonical-resolution regression tests. The S700 water snapshot was reduced from a local capture to a small non-identifying slot subset. The BMS snapshot is synthetic coverage for battery-monitor providers.",
+  "fixtures": {
+    "s700_water_snapshot": {
+      "source": "sanitized_local_capture",
+      "frames": [
+        {
+          "slots": [
+            {"component_id": 3, "sensor_id": 8, "uint_value": 0},
+            {"component_id": 3, "sensor_id": 9, "uint_value": 0},
+            {"component_id": 22, "sensor_id": 2, "uint_value": 100},
+            {"component_id": 30, "sensor_id": 4, "bool_value": true},
+            {"component_id": 30, "sensor_id": 5, "float_value": 13.6},
+            {"component_id": 30, "sensor_id": 8, "bool_value": false},
+            {"component_id": 30, "sensor_id": 14, "bool_value": false}
+          ]
+        }
+      ]
+    },
+    "synthetic_bms_snapshot": {
+      "source": "synthetic",
+      "frames": [
+        {
+          "slots": [
+            {"component_id": 99, "sensor_id": 8, "uint_value": 81},
+            {"component_id": 105, "sensor_id": 2, "bool_value": false},
+            {"component_id": 105, "sensor_id": 6, "bool_value": false},
+            {"component_id": 105, "sensor_id": 22, "float_value": 184.5},
+            {"component_id": 105, "sensor_id": 23, "float_value": 152.0},
+            {"component_id": 105, "sensor_id": 24, "uint_value": 190}
+          ]
+        }
+      ]
+    }
+  }
+}

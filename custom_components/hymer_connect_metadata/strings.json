@@ -1,0 +1,537 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HYMER Connect Metadata Login",
+        "description": "Enter your HYMER Connect account credentials. Prepare and install the local runtime metadata pack first, then use the same email and password as in the HYMER Connect app.",
+        "data": {
+          "brand": "Brand",
+          "username": "Email",
+          "password": "Password"
+        }
+      },
+      "select_vehicle": {
+        "title": "Select Vehicle",
+        "description": "Choose which vehicle to add as a separate Home Assistant entry. You can add the app-extracted remote access token now or later via Reconfigure.",
+        "data": {
+          "selected_vehicle": "Vehicle",
+          "ehg_refresh_token": "EHG Remote Access Refresh Token (optional)"
+        },
+        "data_description": {
+          "ehg_refresh_token": "Needed for live SignalR telemetry and control. You can leave this blank for now and add it later from the config entry menu."
+        }
+      },
+      "reauth_confirm": {
+        "title": "[%key:common::config_flow::title::reauth%]",
+        "description": "The HYMER Connect Metadata integration needs to re-authenticate your account.",
+        "data": {
+          "username": "Email",
+          "password": "Password"
+        }
+      },
+      "reconfigure": {
+        "title": "Update Remote Access Token",
+        "description": "Update the app-extracted EHG remote access refresh token for this vehicle. Leave it blank to remove the stored token.",
+        "data": {
+          "ehg_refresh_token": "EHG Remote Access Refresh Token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to HYMER Connect API",
+      "invalid_auth": "Invalid email or password",
+      "missing_runtime_metadata": "Prepare and install the local runtime metadata pack before signing in",
+      "invalid_remote_access_token": "The remote access token could not be validated for this vehicle",
+      "no_vehicles": "No vehicles were found for this account",
+      "vehicle_not_found": "The configured vehicle could not be resolved from this account",
+      "wrong_account": "The new credentials do not have access to the configured vehicle",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+      "reconfigure_successful": "Reconfiguration was successful"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Display And Debug Options",
+        "description": "Configure optional debug entities and display units for this vehicle entry.",
+        "data": {
+          "show_admin_actions": "Show admin actions",
+          "show_debug_diagnostics": "Show debug diagnostics",
+          "use_miles": "Display distance in miles",
+          "use_fahrenheit": "Display temperature in Fahrenheit"
+        }
+      }
+    }
+  },
+  "issues": {
+    "missing_runtime_metadata": {
+      "title": "Local HYMER runtime metadata is missing",
+      "description": "HYMER Connect Metadata cannot finish setup because the local runtime metadata pack is missing.\n\nMissing files: {missing_files}\n\nFrom a full checkout of this repository on any machine, prepare the metadata pack with:\n```\n{prepare_command}\n```\n\nIf the APK contains a Hermes bytecode bundle, rerun the command with `--bundle-js` or `--bundle-js-url`. Then extract the generated zip into `custom_components/hymer_connect_metadata/data/` inside the Home Assistant config directory and reload the integration."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "activate_tank_refill_interval": {
+        "name": "Activate Tank Refill Interval"
+      },
+      "adblue_level": {
+        "name": "AdBlue Level"
+      },
+      "adblue_remaining_distance": {
+        "name": "Adblue Remaining Distance"
+      },
+      "auxiliary_heater_available": {
+        "name": "Auxiliary Heater Available"
+      },
+      "auxiliary_heater_state": {
+        "name": "Auxiliary Heater State"
+      },
+      "available_capacity": {
+        "name": "Available Capacity"
+      },
+      "battery_soc": {
+        "name": "Living Battery State Of Charge"
+      },
+      "battery_capacity_remaining": {
+        "name": "Living Battery Capacity Remaining"
+      },
+      "battery_relative_capacity": {
+        "name": "Living Battery Relative Capacity"
+      },
+      "battery_state_of_health": {
+        "name": "Living Battery State Of Health"
+      },
+      "battery_temperature": {
+        "name": "Living Battery Temperature"
+      },
+      "battery_time_remaining": {
+        "name": "Living Battery Time Remaining"
+      },
+      "bms_capacity_remaining": {
+        "name": "Bms Capacity Remaining"
+      },
+      "bms_current": {
+        "name": "Bms Current"
+      },
+      "bms_device_failure": {
+        "name": "Bms Device Failure"
+      },
+      "bms_relative_capacity": {
+        "name": "Bms Relative Capacity"
+      },
+      "bms_state_of_health": {
+        "name": "Bms State Of Health"
+      },
+      "bms_temperature": {
+        "name": "Bms Temperature"
+      },
+      "bms_time_remaining": {
+        "name": "Bms Time Remaining"
+      },
+      "bms_voltage": {
+        "name": "Bms Voltage"
+      },
+      "charge_phase": {
+        "name": "Charge Phase"
+      },
+      "charger_current": {
+        "name": "Charger Current"
+      },
+      "charger_input_current": {
+        "name": "Charger Input Current"
+      },
+      "charger_input_frequency": {
+        "name": "Charger Input Frequency"
+      },
+      "charger_input_voltage": {
+        "name": "Charger Input Voltage"
+      },
+      "charger_state": {
+        "name": "Charger State"
+      },
+      "charge_voltage": {
+        "name": "Charge Voltage"
+      },
+      "grey_cartridge_level": {
+        "name": "Grey Cartridge Level"
+      },
+      "connected_bluetooth_devices": {
+        "name": "Connected Bluetooth Devices"
+      },
+      "coolant_low": {
+        "name": "Coolant Low"
+      },
+      "cruise_control_active": {
+        "name": "Cruise Control Active"
+      },
+      "distance_to_service": {
+        "name": "Distance to Service"
+      },
+      "dischargeable_capacity": {
+        "name": "Dischargeable Capacity"
+      },
+      "door_driver": {
+        "name": "Door Driver"
+      },
+      "door_entrance": {
+        "name": "Door Entrance"
+      },
+      "downhill_assist_active": {
+        "name": "Downhill Assist Active"
+      },
+      "ebl_outdoor_temperature": {
+        "name": "EBL Outdoor Temperature"
+      },
+      "fresh_water_level": {
+        "name": "Fresh Water Level"
+      },
+      "fridge_dc_voltage": {
+        "name": "Fridge DC Voltage"
+      },
+      "fridge_warning": {
+        "name": "Fridge Warning"
+      },
+      "fuel_level": {
+        "name": "Fuel Level"
+      },
+      "gps_coordinates": {
+        "name": "Gps Coordinates"
+      },
+      "ignition_state": {
+        "name": "Ignition State"
+      },
+      "inverter_l_1_current": {
+        "name": "Inverter L1 Current"
+      },
+      "inverter_l_1_frequency": {
+        "name": "Inverter L1 Frequency"
+      },
+      "inverter_l_1_voltage": {
+        "name": "Inverter L1 Voltage"
+      },
+      "inverter_l_2_current": {
+        "name": "Inverter L2 Current"
+      },
+      "inverter_l_2_frequency": {
+        "name": "Inverter L2 Frequency"
+      },
+      "inverter_l_2_voltage": {
+        "name": "Inverter L2 Voltage"
+      },
+      "inverter_state": {
+        "name": "Inverter State"
+      },
+      "language_setting": {
+        "name": "Language Setting Code"
+      },
+      "lighting_module_firmware": {
+        "name": "Lighting Module Firmware"
+      },
+      "living_battery_current": {
+        "name": "Living Battery Current"
+      },
+      "living_battery_voltage": {
+        "name": "Living Battery Voltage"
+      },
+      "lpg_level": {
+        "name": "Lpg Level"
+      },
+      "nominal_capacity": {
+        "name": "Nominal Capacity"
+      },
+      "lock_status": {
+        "name": "Lock Status"
+      },
+      "lte_connection_quality": {
+        "name": "Lte Connection Quality"
+      },
+      "motor_oil_warning": {
+        "name": "Motor Oil Warning"
+      },
+      "odometer": {
+        "name": "Odometer"
+      },
+      "outside_temperature": {
+        "name": "Outside Temperature"
+      },
+      "paired_bluetooth_devices": {
+        "name": "Paired Bluetooth Devices"
+      },
+      "parking_brake_engaged": {
+        "name": "Parking Brake Engaged"
+      },
+      "power_source": {
+        "name": "Power Source"
+      },
+      "scu_internal_time": {
+        "name": "Scu Internal Time"
+      },
+      "scu_voltage": {
+        "name": "SCU Voltage"
+      },
+      "solar_current": {
+        "name": "Solar Current"
+      },
+      "solar_panel_power": {
+        "name": "Solar Panel Power"
+      },
+      "solar_voltage": {
+        "name": "Solar Voltage"
+      },
+      "starter_battery_voltage": {
+        "name": "Vehicle Battery Voltage"
+      },
+      "second_lpg_level": {
+        "name": "Second Lpg Level"
+      },
+      "update_tank_level_immediately": {
+        "name": "Update Tank Level Immediately"
+      },
+      "vehicle_brand": {
+        "name": "Vehicle Brand Code"
+      },
+      "vehicle_model": {
+        "name": "Model"
+      },
+      "vehicle_model_year": {
+        "name": "Model year"
+      },
+      "vehicle_type": {
+        "name": "Vehicle Type Code"
+      },
+      "vehicle_vin": {
+        "name": "VIN"
+      },
+      "vin": {
+        "name": "Vin"
+      },
+      "wake_up_chassis": {
+        "name": "Wake Up Chassis"
+      },
+      "washer_fluid_low": {
+        "name": "Washer Fluid Low"
+      },
+      "black_water_level": {
+        "name": "Black Water Level"
+      },
+      "black_cartridge_level": {
+        "name": "Black Cartridge Level"
+      },
+      "flush_cartridge_level": {
+        "name": "Flush Cartridge Level"
+      },
+      "waste_water_level": {
+        "name": "Waste Water Level"
+      }
+    },
+    "binary_sensor": {
+      "cartridge_unit_available": {
+        "name": "Cartridge Unit Available"
+      },
+      "battery_cutoff_switch": {
+        "name": "Living Battery Cutoff Switch"
+      },
+      "battery_keeper_active": {
+        "name": "Starter Battery Maintainer Active"
+      },
+      "battery_charge_detected": {
+        "name": "Living Battery Charging"
+      },
+      "battery_low_warning": {
+        "name": "Battery Low Warning"
+      },
+      "battery_low_voltage": {
+        "name": "Battery Low Voltage"
+      },
+      "battery_switch_active": {
+        "name": "Vehicle Battery Switch Active"
+      },
+      "battery_defect": {
+        "name": "Battery Defect"
+      },
+      "bms_charge_detected": {
+        "name": "BMS Charge Detected"
+      },
+      "d_plus": {
+        "name": "D+ Signal"
+      },
+      "d_plus_state": {
+        "name": "D+ Signal"
+      },
+      "ebl_over_temperature": {
+        "name": "EBL Over Temperature"
+      },
+      "engine_running": {
+        "name": "Engine Running"
+      },
+      "external_bluetooth_device_connected": {
+        "name": "External Bluetooth Device Connected"
+      },
+      "fresh_water_sensor_failure": {
+        "name": "Fresh Water Sensor Failure"
+      },
+      "flush_tank_available": {
+        "name": "Flush Tank Available"
+      },
+      "fridge_door_open": {
+        "name": "Fridge Door Open"
+      },
+      "heater_error": {
+        "name": "Heater Error"
+      },
+      "heater_panel_busy": {
+        "name": "Heater Panel Busy"
+      },
+      "heater_response_error": {
+        "name": "Heater Response Error"
+      },
+      "heater_shoreline_connected": {
+        "name": "Heater Shoreline Connected"
+      },
+      "heater_window_closed": {
+        "name": "Heater Window Closed"
+      },
+      "lightsense_night": {
+        "name": "Lightsense Night"
+      },
+      "lte_connection_state": {
+        "name": "LTE Connection State"
+      },
+      "pulsing_flush_status": {
+        "name": "Pulsing Flush Status"
+      },
+      "reuse_grey_water_status": {
+        "name": "Reuse Grey Water Status"
+      },
+      "outside_temp_calib_failure": {
+        "name": "Outside Temperature Calibration Failure"
+      },
+      "outside_temp_sensor_failure": {
+        "name": "Outside Temperature Sensor Failure"
+      },
+      "tank_unit_available": {
+        "name": "Tank Unit Available"
+      },
+      "scu_shoreline_connected": {
+        "name": "SCU Shoreline Connected"
+      },
+      "shoreline_connected": {
+        "name": "Shoreline Connected"
+      },
+      "solar_active": {
+        "name": "Solar Active"
+      },
+      "solar_aes_active": {
+        "name": "Solar AES Active"
+      },
+      "solar_error": {
+        "name": "Solar Error"
+      },
+      "solar_reduced_power": {
+        "name": "Solar Reduced Power"
+      },
+      "vehicle_movement": {
+        "name": "Vehicle Movement"
+      },
+      "waste_water_sensor_failure": {
+        "name": "Waste Water Sensor Failure"
+      }
+    },
+    "switch": {
+      "battery_type": {
+        "name": "Battery Type"
+      },
+      "fridge_eco": {
+        "name": "Fridge Eco"
+      },
+      "charger_enabled": {
+        "name": "Charger Enabled"
+      },
+      "heater_air_mode": {
+        "name": "Heater Air Mode"
+      },
+      "inverter_enabled": {
+        "name": "Inverter Enabled"
+      },
+      "lighting_module_12v_supply": {
+        "name": "Lighting Module 12V Supply"
+      },
+      "lighting_module_all_off": {
+        "name": "Lighting Module All Off"
+      },
+      "lighting_module_d_plus": {
+        "name": "Lighting Module D Plus"
+      },
+      "main_switch": {
+        "name": "12 V Switch"
+      },
+      "night_mode": {
+        "name": "Silent Mode"
+      },
+      "user_active": {
+        "name": "User Active"
+      },
+      "water_pump": {
+        "name": "Water Pump"
+      }
+    },
+    "number": {
+      "freezer_level": {
+        "name": "Freezer Level"
+      },
+      "fresh_water_level": {
+        "name": "Fresh Water Level"
+      },
+      "gray_water_level": {
+        "name": "Gray Water Level"
+      },
+      "heater_power_limit": {
+        "name": "Heater Electric Power Limit"
+      },
+      "living_battery_capacity": {
+        "name": "Living Battery Capacity"
+      },
+      "test_signal_write": {
+        "name": "Test Signal Write"
+      }
+    },
+    "select": {
+      "aircon_mode": {
+        "name": "Air conditioner mode"
+      },
+      "fan_mode": {
+        "name": "Fan mode"
+      },
+      "boiler_mode_ctrl": {
+        "name": "Boiler mode"
+      },
+      "heater_air_energy_source": {
+        "name": "Heater air energy source"
+      },
+      "heater_energy_ctrl": {
+        "name": "Heater Energy Source"
+      },
+      "heater_water_energy_source": {
+        "name": "Heater water energy source"
+      },
+      "mode": {
+        "name": "Mode"
+      },
+      "power_mode": {
+        "name": "Power mode"
+      },
+      "set_power_mode": {
+        "name": "Set power mode"
+      },
+      "water_heater_mode": {
+        "name": "Water heater mode"
+      }
+    },
+    "climate": {},
+    "light": {}
+  }
+}

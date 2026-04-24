@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hymer-token-tool"
+version = "0.1.0"
+description = "Standalone HYMER Connect token and pairing preflight utility"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "aiohttp>=3.9,<4",
+  "bleak>=0.22,<1",
+]
+
+[project.scripts]
+hymer-token-tool = "hymer_token_tool.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]

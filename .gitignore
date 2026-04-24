@@ -1,0 +1,48 @@
+# Reverse engineering artifacts
+reference/
+source/
+tools/*
+!tools/hymer_token_tool/
+!tools/hymer_token_tool/**
+tools/archive/
+analyze_*.js
+*.docx
+/custom_components/hymer_connect_metadata/data/*.json
+
+# Duplicate root-level component files (canonical copies live in custom_components/)
+/__init__.py
+/api.py
+/binary_sensor.py
+/config_flow.py
+/const.py
+/coordinator.py
+/sensor.py
+/manifest.json
+/strings.json
+
+# Translation duplicates at root
+/translations/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv*/
+.env
+
+# Local tooling
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Memory bank (local only)
+.memory-bank/
+
+# Personal secrets (QR codes, tokens, private data)
+secrets/
+private_*
+test_signalr.py
+docs/release-plan.md
+custom_components/decode_cmds.py

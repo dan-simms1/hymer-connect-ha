@@ -1,0 +1,444 @@
+{
+  "_comment": "Rich-template metadata used by the integration to map observed slot layouts onto aggregated Home Assistant entities.",
+  "defaults": {
+    "read_validation_status": "inferred",
+    "write_validation_status": "runtime_path_only",
+    "evidence_sources": [
+      "registry",
+      "bundle"
+    ]
+  },
+  "light": {
+    "simple_component": {
+      "required_slots": [
+        {
+          "sensor_id": 1,
+          "label": "on_off",
+          "datatype": "bool"
+        },
+        {
+          "sensor_id": 2,
+          "label": "brightness",
+          "datatype": "int"
+        }
+      ],
+      "optional_slots": [
+        {
+          "sensor_id": 3,
+          "label": "color_temp",
+          "datatype": "int"
+        }
+      ],
+      "fallback_name": "Light"
+    },
+    "named_channels": {
+      "accepted_exact_labels": [
+        "light"
+      ],
+      "accepted_label_suffixes": [
+        "_light",
+        "_lights"
+      ],
+      "brightness_suffix": "_brightness",
+      "ignored_prefixes": [
+        "lighting_module_"
+      ],
+      "ignored_suffixes": [
+        "_with_delay",
+        "_switch"
+      ]
+    }
+  },
+  "cover": {
+    "awning": {
+      "component_kinds": [
+        "awning"
+      ],
+      "trigger_slots": [
+        1,
+        2,
+        7
+      ],
+      "claim_slots": [
+        1,
+        2,
+        5,
+        6,
+        7,
+        8
+      ],
+      "position_slot": 7
+    }
+  },
+  "switch": {
+    "fridge_power": {
+      "component_kinds": [
+        "fridge"
+      ],
+      "required_slots": [
+        {
+          "sensor_id": 1,
+          "label": "fridge_power",
+          "datatype": "bool"
+        }
+      ],
+      "power_slot": 1
+    }
+  },
+  "climate": {
+    "air_conditioner_single_zone": {
+      "component_kinds": [
+        "air_conditioner"
+      ],
+      "required_slots": [
+        {
+          "sensor_id": 1,
+          "label": "target_room_temperature"
+        },
+        {
+          "sensor_id": 2,
+          "label": "actual_room_temperature"
+        },
+        {
+          "sensor_id": 3
+        }
+      ],
+      "claim_slots": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "target_sid": 1,
+      "current_sid": 2,
+      "mode_sid": 3,
+      "fan_sid": 4,
+      "name": "Air Conditioner"
+    },
+    "airxcel_zones": [
+      {
+        "zone": "front",
+        "component_kinds": [
+          "air_conditioner"
+        ],
+        "required_slots": [
+          {
+            "sensor_id": 1,
+            "label": "air_con_mode_front"
+          },
+          {
+            "sensor_id": 4,
+            "label": "heat_temperature_front"
+          },
+          {
+            "sensor_id": 5,
+            "label": "cool_temperature_front"
+          }
+        ],
+        "claim_slots": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "mode_sid": 1,
+        "fan_mode_sid": 2,
+        "fan_speed_sid": 3,
+        "heat_target_sid": 4,
+        "cool_target_sid": 5,
+        "ambient_sid": 14,
+        "name": "Front Air Conditioner"
+      },
+      {
+        "zone": "rear",
+        "component_kinds": [
+          "air_conditioner"
+        ],
+        "required_slots": [
+          {
+            "sensor_id": 17,
+            "label": "air_con_mode_rear"
+          },
+          {
+            "sensor_id": 20,
+            "label": "heat_temperature_rear"
+          },
+          {
+            "sensor_id": 21,
+            "label": "cool_temperature_rear"
+          }
+        ],
+        "claim_slots": [
+          17,
+          18,
+          19,
+          20,
+          21
+        ],
+        "mode_sid": 17,
+        "fan_mode_sid": 18,
+        "fan_speed_sid": 19,
+        "heat_target_sid": 20,
+        "cool_target_sid": 21,
+        "ambient_sid": 30,
+        "name": "Rear Air Conditioner"
+      }
+    ],
+    "truma_panel_heater": {
+      "component_kinds": [
+        "truma_heater"
+      ],
+      "required_slots": [
+        {
+          "sensor_id": 8
+        }
+      ],
+      "claim_slots": [
+        8
+      ],
+      "setpoint_sid": 8,
+      "name": "Heater"
+    },
+    "modern_heaters": [
+      {
+        "variant": "heater_neo",
+        "component_kinds": [
+          "heater_neo"
+        ],
+        "required_slots": [
+          {
+            "sensor_id": 10
+          },
+          {
+            "sensor_id": 11
+          }
+        ],
+        "claim_slots": [
+          10,
+          11,
+          13
+        ],
+        "name": "Air Heater",
+        "unique_suffix": "heater_neo",
+        "target_sid": 10,
+        "current_sid": 20,
+        "mode_sid": 11,
+        "fan_sid": 13
+      },
+      {
+        "variant": "heater_zone",
+        "component_kinds": [
+          "heater"
+        ],
+        "required_slots": [
+          {
+            "sensor_id": 3
+          },
+          {
+            "sensor_id": 4
+          }
+        ],
+        "claim_slots": [
+          3,
+          4
+        ],
+        "name": "Zone Heater",
+        "unique_suffix": "heater_zone",
+        "target_sid": 4,
+        "current_sid": 11,
+        "mode_sid": 3,
+        "fan_sid": null
+      }
+    ]
+  },
+  "select": {
+    "fridge_level": {
+      "component_kinds": [
+        "fridge"
+      ],
+      "required_slots": [
+        {
+          "sensor_id": 3,
+          "label": "fridge_level",
+          "datatype": "int"
+        }
+      ],
+      "level_slot": 3
+    },
+    "boiler_mode": {
+      "component_kinds": [
+        "truma_heater"
+      ],
+      "required_slots": [
+        {
+          "sensor_id": 5
+        }
+      ],
+      "options": [
+        "Off",
+        "ECO",
+        "Turbo"
+      ],
+      "wire_values": {
+        "Off": "OFF",
+        "ECO": "ECO",
+        "Turbo": "HOT"
+      },
+      "mode_slot": 5,
+      "energy_source_slot": 4
+    },
+    "heater_energy": {
+      "component_kinds": [
+        "truma_heater"
+      ],
+      "required_slots": [
+        {
+          "sensor_id": 4
+        },
+        {
+          "sensor_id": 6
+        }
+      ],
+      "options": [
+        "Diesel",
+        "Mix 900W",
+        "Mix 1800W",
+        "Electric 900W",
+        "Electric 1800W"
+      ],
+      "mode_slot": 4,
+      "mirror_slot": 6,
+      "power_slot": 9,
+      "writes": {
+        "Diesel": [
+          {
+            "sensor_id": 4,
+            "type": "str",
+            "value": "Diesel"
+          },
+          {
+            "sensor_id": 6,
+            "type": "str",
+            "value": "Diesel"
+          }
+        ],
+        "Electric 900W": [
+          {
+            "sensor_id": 4,
+            "type": "str",
+            "value": "Electricity"
+          },
+          {
+            "sensor_id": 6,
+            "type": "str",
+            "value": "Electricity"
+          },
+          {
+            "sensor_id": 9,
+            "type": "uint",
+            "value": 900
+          }
+        ],
+        "Electric 1800W": [
+          {
+            "sensor_id": 4,
+            "type": "str",
+            "value": "Electricity"
+          },
+          {
+            "sensor_id": 6,
+            "type": "str",
+            "value": "Electricity"
+          },
+          {
+            "sensor_id": 9,
+            "type": "uint",
+            "value": 1800
+          }
+        ],
+        "Mix 900W": [
+          {
+            "sensor_id": 4,
+            "type": "str",
+            "value": "Both"
+          },
+          {
+            "sensor_id": 6,
+            "type": "str",
+            "value": "Both"
+          },
+          {
+            "sensor_id": 9,
+            "type": "uint",
+            "value": 900
+          }
+        ],
+        "Mix 1800W": [
+          {
+            "sensor_id": 4,
+            "type": "str",
+            "value": "Both"
+          },
+          {
+            "sensor_id": 6,
+            "type": "str",
+            "value": "Both"
+          },
+          {
+            "sensor_id": 9,
+            "type": "uint",
+            "value": 1800
+          }
+        ]
+      }
+    }
+  },
+  "fan": {
+    "entities": [
+      {
+        "kind": "airxcel_roof_fan",
+        "component_id": 95,
+        "name": "Front Roof Fan",
+        "state_sid": 6,
+        "speed_mode_sid": 8,
+        "speed_sid": 9
+      },
+      {
+        "kind": "airxcel_roof_fan",
+        "component_id": 95,
+        "name": "Rear Roof Fan",
+        "state_sid": 22,
+        "speed_mode_sid": 24,
+        "speed_sid": 25
+      },
+      {
+        "kind": "maxxfan",
+        "component_id": 102,
+        "name": "Roof Fan",
+        "state_sid": 1,
+        "speed_sid": 3,
+        "attribute_slots": {
+          "rain_sensor": 4,
+          "device_failure": 5
+        }
+      },
+      {
+        "kind": "maxxfan",
+        "component_id": 102,
+        "name": "Rear Roof Fan",
+        "state_sid": 7,
+        "speed_sid": 9,
+        "attribute_slots": {
+          "rain_sensor": 11
+        }
+      },
+      {
+        "kind": "simple",
+        "component_id": 98,
+        "name": "Bathroom Fan",
+        "state_sid": 13
+      }
+    ]
+  }
+}

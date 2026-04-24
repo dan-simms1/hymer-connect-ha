@@ -1,0 +1,14 @@
+{
+  "domain": "hymer_connect_metadata",
+  "name": "HYMER Connect Metadata",
+  "codeowners": ["@dan-simms1"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/dan-simms1/hymer-connect-ha",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/dan-simms1/hymer-connect-ha/issues",
+  "loggers": ["hymer_connect_metadata"],
+  "requirements": [],
+  "version": "1.0.4"
+}
