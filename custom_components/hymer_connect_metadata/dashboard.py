@@ -957,17 +957,14 @@ def _build_dashboard_view(title: str, items: list[DashboardEntity]) -> dict[str,
     if gauge_grid is not None:
         columns.append(gauge_grid)
 
-    root_grid = _grid_card(columns, columns=min(len(columns), 3))
-
-    if root_grid is None:
+    if not columns:
         return None
 
     return {
         "title": APP_TAB_TITLES["dashboard"],
         "path": "dashboard",
         "icon": APP_TAB_ICONS["dashboard"],
-        "panel": True,
-        "cards": [root_grid],
+        "cards": columns,
     }
 
 
@@ -1079,16 +1076,11 @@ def _build_energy_view(
     if not columns:
         return None
 
-    root_grid = _grid_card(columns, columns=min(len(columns), 3))
-    if root_grid is None:
-        return None
-
     return {
         "title": APP_TAB_TITLES["energy"],
         "path": "energy",
         "icon": APP_TAB_ICONS["energy"],
-        "panel": True,
-        "cards": [root_grid],
+        "cards": columns,
     }
 
 
@@ -1221,11 +1213,6 @@ def _build_standard_view(
         "icon": APP_TAB_ICONS[tab],
         "cards": cards,
     }
-    if tab == "climate":
-        root_grid = _grid_card(cards, columns=_responsive_columns(len(cards), maximum=2))
-        if root_grid is not None:
-            view["panel"] = True
-            view["cards"] = [root_grid]
     return view
 
 

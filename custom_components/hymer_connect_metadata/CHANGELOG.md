@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] - 2026-04-26
+
+### Changed
+
+- **Generated dashboard responsiveness** — Dashboard, Energy, and Climate views
+  now use top-level Lovelace cards instead of fixed panel grids, so Home
+  Assistant can wrap the main columns more naturally on phones, tablets, and
+  wide desktop screens
+- **Dashboard docs** — expands the README instructions for the local
+  `hymer_connect_metadata.generate_dashboard` service, including multi-vehicle
+  `entry_id` handling, generated URL paths, and regeneration after dashboard
+  changes
+
 ## [1.0.7] - 2026-04-25
 
 ### Changed

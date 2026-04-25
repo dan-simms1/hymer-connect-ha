@@ -365,10 +365,45 @@ The generated dashboard groups capabilities into app-style tabs such as:
 Typical flow:
 
 1. install the integration and let it populate entities for your vehicle
-2. call `hymer_connect_metadata.generate_dashboard` from Developer Tools
-3. the integration writes a local YAML audit copy under `/config/dashboards/hymer_connect_metadata/`
-4. the integration persists a Lovelace dashboard and adds it to the sidebar
-5. open the generated dashboard directly in Home Assistant
+2. go to **Developer Tools -> Services**
+3. select `HYMER Connect Metadata: Generate Dashboard`
+4. run the service once the vehicle's entities have been created
+5. open the generated dashboard from the Home Assistant sidebar
+
+For a single HYMER Connect Metadata config entry, the service can be called
+with no data:
+
+```yaml
+{}
+```
+
+If you have more than one van configured, pass the config entry ID for the
+vehicle you want to generate:
+
+```yaml
+entry_id: 01K...
+```
+
+Optional fields:
+
+- `title` sets the Lovelace dashboard title; default is `<vehicle title> Dashboard`
+- `filename` sets the local YAML audit filename stem
+- `url_path` sets the Home Assistant dashboard URL path
+
+Generated output:
+
+1. the integration writes a local YAML audit copy under `/config/dashboards/hymer_connect_metadata/`
+2. the integration persists a Lovelace dashboard and adds it to the sidebar
+3. the dashboard is restored automatically after Home Assistant restarts
+
+Regenerate the dashboard after:
+
+- updating this integration to a version with dashboard changes
+- adding or removing vehicle hardware/capabilities
+- changing entity naming enough that you want the generated labels refreshed
+
+When regenerated with the same `url_path`, the existing generated dashboard is
+updated in place.
 
 The generated dashboard is stored locally in your Home Assistant instance, so
 it survives Home Assistant restarts. The YAML file is kept as a readable local

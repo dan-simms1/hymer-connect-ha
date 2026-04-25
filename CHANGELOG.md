@@ -6,6 +6,5 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `1.0.7` — refines the generated Energy dashboard layout into functional
-  columns and replaces the large battery-voltage history graph with compact
-  per-sensor voltage trend cards
+- `1.0.8` — makes the generated Dashboard, Energy, and Climate views more
+  responsive by letting Home Assistant lay out the main columns directly
