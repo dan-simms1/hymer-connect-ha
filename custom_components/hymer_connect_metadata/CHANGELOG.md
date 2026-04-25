@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] - 2026-04-25
+
+### Added
+
+- **Generated Lovelace dashboard service** — adds
+  `hymer_connect_metadata.generate_dashboard`, which builds a local app-style
+  dashboard from the entities resolved for the selected vehicle
+- **Persisted dashboard output** — generated dashboards are written both as a
+  readable local YAML audit copy under
+  `/config/dashboards/hymer_connect_metadata/` and as a Lovelace storage
+  dashboard that survives Home Assistant restarts
+- **Location map card** — the generated dashboard now uses the live vehicle
+  `device_tracker` entity to show the van location on the main dashboard and
+  Info tab without storing coordinates in the repository or generated YAML
+
+### Changed
+
+- **App-style dashboard grouping** — generated views now group capabilities
+  into Dashboard, Info, Water, Light, Energy, Climate, Components, and
+  Scenarios tabs based on canonical capabilities, rich templates, and selected
+  fallback entities
+- **Light controls** — generated light sections now show an explicit
+  `All on/off` aggregate row for each area group, followed by the individual
+  light toggles for that section
+- **Dashboard docs and backlog** — README and backlog notes now describe the
+  generator model instead of a fixed shipped dashboard pack
+
 ## [1.0.4] - 2026-04-24
 
 ### Changed

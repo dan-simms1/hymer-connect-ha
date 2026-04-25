@@ -141,6 +141,51 @@ def install_homeassistant_stubs() -> None:
     diagnostics = module("homeassistant.components.diagnostics")
     diagnostics.async_redact_data = lambda data, _: data
 
+    frontend = module("homeassistant.components.frontend")
+    frontend.registered_panels = []
+
+    def _async_register_built_in_panel(hass, component_name, **kwargs):
+        frontend.registered_panels.append(
+            {
+                "hass": hass,
+                "component_name": component_name,
+                **kwargs,
+            }
+        )
+
+    frontend.async_register_built_in_panel = _async_register_built_in_panel
+    frontend.async_panel_exists = lambda hass, url_path: False
+    frontend.async_remove_panel = lambda hass, url_path: None
+
+    lovelace = module("homeassistant.components.lovelace")
+    lovelace.LOVELACE_DATA = "lovelace_data"
+
+    lovelace_const = module("homeassistant.components.lovelace.const")
+    lovelace_const.CONF_FILENAME = "filename"
+    lovelace_const.CONF_ICON = "icon"
+    lovelace_const.CONF_MODE = "mode"
+    lovelace_const.CONF_REQUIRE_ADMIN = "require_admin"
+    lovelace_const.CONF_SHOW_IN_SIDEBAR = "show_in_sidebar"
+    lovelace_const.CONF_TITLE = "title"
+    lovelace_const.CONF_URL_PATH = "url_path"
+    lovelace_const.DEFAULT_ICON = "mdi:view-dashboard"
+    lovelace_const.DOMAIN = "lovelace"
+    lovelace_const.MODE_YAML = "yaml"
+
+    lovelace_dashboard = module("homeassistant.components.lovelace.dashboard")
+
+    class _LovelaceYAML:
+        def __init__(self, hass, url_path, config) -> None:
+            self.hass = hass
+            self.url_path = url_path
+            self.config = {**config, "url_path": url_path}
+
+        @property
+        def mode(self):
+            return "yaml"
+
+    lovelace_dashboard.LovelaceYAML = _LovelaceYAML
+
     device_tracker = module("homeassistant.components.device_tracker")
     device_tracker.SourceType = types.SimpleNamespace(GPS="gps")
 
@@ -185,6 +230,9 @@ def install_homeassistant_stubs() -> None:
     ha_const.ATTR_TEMPERATURE = "temperature"
     ha_const.ATTR_TARGET_TEMP_HIGH = "target_temp_high"
     ha_const.ATTR_TARGET_TEMP_LOW = "target_temp_low"
+    ha_const.CONF_FILENAME = "filename"
+    ha_const.CONF_ICON = "icon"
+    ha_const.CONF_MODE = "mode"
     ha_const.CONF_PASSWORD = "password"
     ha_const.CONF_USERNAME = "username"
     ha_const.EVENT_HOMEASSISTANT_STOP = "homeassistant_stop"

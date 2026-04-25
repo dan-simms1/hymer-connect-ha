@@ -12,9 +12,10 @@
 
 ## Dashboards
 
-- Revisit example Home Assistant dashboards after the entity model settles.
-- Treat them as examples to adapt per vehicle, not as supported drop-in packs.
-- Generate them against `hymer_connect_metadata` entity naming, not the old
-  `hymer_connect` domain.
-- Keep any future dashboard docs separate from the main install path so users
-  do not assume dashboards are shipped or supported by default.
+- Improve the generated dashboard service rather than shipping a fixed pack.
+- Keep the generated layout tied to canonical capabilities and rich templates,
+  not raw slot names.
+- Use locally generated runtime metadata to refine app-like grouping and naming
+  without tracking extracted dashboard definitions in git.
+- Treat any future shipped examples as examples to adapt per vehicle, not as
+  supported drop-in packs.
