@@ -3,17 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+from functools import partial
 import logging
+from pathlib import Path
+import re
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    CONF_FILENAME,
+    CONF_ICON,
+    CONF_MODE,
     CONF_PASSWORD,
     CONF_USERNAME,
     EVENT_HOMEASSISTANT_STOP,
     Platform,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+)
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
@@ -36,6 +47,12 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import HymerConnectCoordinator
+from .dashboard import (
+    build_dashboard_config,
+    describe_dashboard_entity,
+    write_dashboard_storage,
+    write_dashboard_yaml,
+)
 from .repairs import (
     async_create_missing_runtime_metadata_issue,
     async_delete_missing_runtime_metadata_issue,
@@ -60,6 +77,12 @@ from .template_specs import (
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORM_LIST = [Platform(p) for p in PLATFORMS]
+SERVICE_GENERATE_DASHBOARD = "generate_dashboard"
+_GENERATED_DASHBOARD_KEY = "generated_dashboard"
+_GENERATED_DASHBOARD_TITLE = "title"
+_GENERATED_DASHBOARD_FILENAME = "filename"
+_GENERATED_DASHBOARD_URL_PATH = "url_path"
+_GENERATED_DASHBOARD_STORAGE_ID = "storage_id"
 
 HymerConnectConfigEntry = ConfigEntry
 
@@ -74,6 +97,371 @@ def _schedule_coordinator_shutdown(
 ) -> None:
     """Schedule coordinator shutdown from any Home Assistant thread context."""
     hass.create_task(coordinator.async_prepare_for_shutdown())
+
+
+def _dashboard_slug(value: str) -> str:
+    rendered = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return rendered or "hymer-connect"
+
+
+def _dashboard_storage_id(entry: HymerConnectConfigEntry) -> str:
+    return f"{DOMAIN}_{entry.entry_id.lower()}"
+
+
+def _dashboard_config_dir(hass: HomeAssistant) -> Path:
+    return (
+        Path(hass.config.path())
+        if hasattr(hass, "config") and hasattr(hass.config, "path")
+        else Path("/config")
+    )
+
+
+def _dashboard_output_path(
+    hass: HomeAssistant,
+    entry: HymerConnectConfigEntry,
+    filename: str | None,
+) -> Path:
+    base_dir = (
+        Path(hass.config.path("dashboards", DOMAIN))
+        if hasattr(hass, "config") and hasattr(hass.config, "path")
+        else Path("/config") / "dashboards" / DOMAIN
+    )
+    stem = filename or entry.title or entry.entry_id
+    return base_dir / f"{_dashboard_slug(stem)}.yaml"
+
+
+def _dashboard_relative_filename(
+    hass: HomeAssistant,
+    output_path: Path,
+) -> str:
+    """Return a Lovelace-friendly config-relative filename."""
+    config_dir = _dashboard_config_dir(hass)
+    try:
+        return str(output_path.relative_to(config_dir))
+    except ValueError:
+        return str(output_path)
+
+
+def _dashboard_absolute_path(
+    hass: HomeAssistant,
+    filename: str,
+) -> Path:
+    """Resolve a dashboard filename back to an absolute path."""
+    file_path = Path(filename)
+    if file_path.is_absolute():
+        return file_path
+    return Path(hass.config.path(filename))
+
+
+def _generated_dashboard_registration(
+    entry: HymerConnectConfigEntry,
+) -> dict[str, str] | None:
+    """Return persisted generated-dashboard metadata for an entry."""
+    entry_data = getattr(entry, "data", None)
+    if not isinstance(entry_data, dict):
+        return None
+    registration = entry_data.get(_GENERATED_DASHBOARD_KEY)
+    if not isinstance(registration, dict):
+        return None
+    title = registration.get(_GENERATED_DASHBOARD_TITLE)
+    filename = registration.get(_GENERATED_DASHBOARD_FILENAME)
+    url_path = registration.get(_GENERATED_DASHBOARD_URL_PATH)
+    storage_id = registration.get(_GENERATED_DASHBOARD_STORAGE_ID)
+    if not all(isinstance(value, str) and value for value in (title, filename, url_path)):
+        return None
+    result = {
+        _GENERATED_DASHBOARD_TITLE: title,
+        _GENERATED_DASHBOARD_FILENAME: filename,
+        _GENERATED_DASHBOARD_URL_PATH: url_path,
+    }
+    if isinstance(storage_id, str) and storage_id:
+        result[_GENERATED_DASHBOARD_STORAGE_ID] = storage_id
+    return result
+
+
+async def _async_register_yaml_dashboard(
+    hass: HomeAssistant,
+    *,
+    url_path: str,
+    title: str,
+    filename: str,
+    icon: str = "mdi:caravan",
+    show_in_sidebar: bool = True,
+    require_admin: bool = False,
+) -> None:
+    """Create or update a YAML Lovelace dashboard entry."""
+    from homeassistant.components import frontend
+    from homeassistant.components.lovelace import LOVELACE_DATA
+    from homeassistant.components.lovelace import dashboard as lovelace_dashboard
+    from homeassistant.components.lovelace.const import (
+        CONF_REQUIRE_ADMIN,
+        CONF_SHOW_IN_SIDEBAR,
+        CONF_TITLE,
+        CONF_URL_PATH,
+        DEFAULT_ICON,
+        DOMAIN as LOVELACE_DOMAIN,
+        MODE_YAML,
+    )
+
+    lovelace_data = hass.data.get(LOVELACE_DATA)
+    if lovelace_data is None:
+        raise HomeAssistantError(
+            "Lovelace is not loaded; cannot auto-register the generated dashboard"
+        )
+
+    config = {
+        CONF_TITLE: title,
+        CONF_ICON: icon or DEFAULT_ICON,
+        CONF_SHOW_IN_SIDEBAR: show_in_sidebar,
+        CONF_REQUIRE_ADMIN: require_admin,
+        CONF_MODE: MODE_YAML,
+        CONF_FILENAME: filename,
+        CONF_URL_PATH: url_path,
+    }
+
+    existing = lovelace_data.dashboards.get(url_path)
+    if existing is not None and getattr(existing, "mode", None) != MODE_YAML:
+        raise HomeAssistantError(
+            f"A non-YAML dashboard already exists at '/{url_path}'"
+        )
+
+    update = existing is not None
+    lovelace_data.yaml_dashboards[url_path] = config
+    if existing is None:
+        lovelace_data.dashboards[url_path] = lovelace_dashboard.LovelaceYAML(
+            hass,
+            url_path,
+            config,
+        )
+    else:
+        existing.config = config
+
+    frontend.async_register_built_in_panel(
+        hass,
+        LOVELACE_DOMAIN,
+        frontend_url_path=url_path,
+        require_admin=require_admin,
+        show_in_sidebar=show_in_sidebar,
+        sidebar_title=title,
+        sidebar_icon=icon or DEFAULT_ICON,
+        config={"mode": MODE_YAML},
+        update=update,
+    )
+
+
+async def _async_restore_generated_dashboard(
+    hass: HomeAssistant,
+    entry: HymerConnectConfigEntry,
+) -> None:
+    """Restore a previously generated YAML dashboard into Lovelace."""
+    registration = _generated_dashboard_registration(entry)
+    if registration is None:
+        return
+    if registration.get(_GENERATED_DASHBOARD_STORAGE_ID):
+        return
+
+    output_path = _dashboard_absolute_path(
+        hass,
+        registration[_GENERATED_DASHBOARD_FILENAME],
+    )
+    if not output_path.exists():
+        _LOGGER.warning(
+            "Generated HYMER dashboard file for %s is missing: %s",
+            entry.title,
+            output_path,
+        )
+        return
+
+    try:
+        await _async_register_yaml_dashboard(
+            hass,
+            url_path=_dashboard_slug(
+                registration[_GENERATED_DASHBOARD_URL_PATH]
+            ),
+            title=registration[_GENERATED_DASHBOARD_TITLE],
+            filename=registration[_GENERATED_DASHBOARD_FILENAME],
+        )
+    except HomeAssistantError as err:
+        _LOGGER.warning(
+            "Could not restore generated HYMER dashboard for %s: %s",
+            entry.title,
+            err,
+        )
+
+
+def _entity_display_name(entity_entry: Any) -> str:
+    name = getattr(entity_entry, "name", None) or getattr(
+        entity_entry,
+        "original_name",
+        None,
+    )
+    if isinstance(name, str) and name:
+        return name
+    entity_id = getattr(entity_entry, "entity_id", "entity")
+    if isinstance(entity_id, str) and "." in entity_id:
+        entity_id = entity_id.split(".", 1)[1]
+    return str(entity_id).replace("_", " ").title()
+
+
+def _dashboard_allows_entity_category(entity: Any) -> bool:
+    """Return True when a categorized entity still belongs on the dashboard."""
+    return (
+        getattr(entity, "tab", None) == "info"
+        and getattr(entity, "section", None)
+        in {
+            "Basic Data",
+            "Chassis Information",
+            "Connectivity",
+            "Doors",
+            "Location",
+        }
+    )
+
+
+async def _async_handle_generate_dashboard_service(
+    hass: HomeAssistant,
+    call: Any,
+) -> None:
+    loaded_entries = hass.data.get(DOMAIN, {})
+    if not loaded_entries:
+        raise HomeAssistantError(
+            "No loaded HYMER Connect Metadata entries are available"
+        )
+
+    requested_entry_id = call.data.get("entry_id") if hasattr(call, "data") else None
+    if requested_entry_id:
+        coordinator = loaded_entries.get(requested_entry_id)
+        if coordinator is None:
+            raise HomeAssistantError(
+                f"HYMER entry '{requested_entry_id}' is not currently loaded"
+            )
+    elif len(loaded_entries) == 1:
+        coordinator = next(iter(loaded_entries.values()))
+    else:
+        raise HomeAssistantError(
+            "Multiple HYMER entries are loaded; specify entry_id"
+        )
+
+    entry = getattr(coordinator, "config_entry", None)
+    if entry is None:
+        raise HomeAssistantError(
+            "The loaded HYMER entry does not expose config entry metadata"
+        )
+
+    entity_registry = er.async_get(hass)
+    dashboard_entities = []
+    for entity_entry in er.async_entries_for_config_entry(entity_registry, entry.entry_id):
+        if getattr(entity_entry, "platform", None) != DOMAIN:
+            continue
+        if getattr(entity_entry, "disabled_by", None) is not None:
+            continue
+        if getattr(entity_entry, "hidden_by", None) is not None:
+            continue
+        unique_id = getattr(entity_entry, "unique_id", None)
+        entity_id = getattr(entity_entry, "entity_id", None)
+        if not isinstance(unique_id, str) or not isinstance(entity_id, str):
+            continue
+        described = describe_dashboard_entity(
+            entry.entry_id,
+            entity_id=entity_id,
+            unique_id=unique_id,
+            name=_entity_display_name(entity_entry),
+        )
+        if described is not None:
+            if (
+                getattr(entity_entry, "entity_category", None) is not None
+                and not _dashboard_allows_entity_category(described)
+            ):
+                continue
+            dashboard_entities.append(described)
+
+    config = build_dashboard_config(
+        call.data.get("title") if hasattr(call, "data") and call.data.get("title") else f"{entry.title} Dashboard",
+        dashboard_entities,
+    )
+    if not config.get("views"):
+        raise HomeAssistantError(
+            "No dashboard-worthy HYMER entities were found for the selected entry"
+        )
+
+    output_path = _dashboard_output_path(
+        hass,
+        entry,
+        call.data.get("filename") if hasattr(call, "data") else None,
+    )
+    await hass.async_add_executor_job(write_dashboard_yaml, output_path, config)
+    output_filename = _dashboard_relative_filename(hass, output_path)
+    requested_url_path = (
+        call.data.get("url_path") if hasattr(call, "data") else None
+    )
+    url_path = _dashboard_slug(
+        requested_url_path or output_path.stem
+    )
+    storage_id = _dashboard_storage_id(entry)
+    await hass.async_add_executor_job(
+        partial(
+            write_dashboard_storage,
+            _dashboard_config_dir(hass),
+            storage_id=storage_id,
+            url_path=url_path,
+            title=config["title"],
+            config=config,
+        )
+    )
+    try:
+        await _async_register_yaml_dashboard(
+            hass,
+            url_path=url_path,
+            title=config["title"],
+            filename=output_filename,
+        )
+    except HomeAssistantError as err:
+        _LOGGER.info(
+            "Generated HYMER storage dashboard for %s, but live YAML panel "
+            "registration was skipped: %s",
+            entry.title,
+            err,
+        )
+    registration = {
+        _GENERATED_DASHBOARD_TITLE: config["title"],
+        _GENERATED_DASHBOARD_FILENAME: output_filename,
+        _GENERATED_DASHBOARD_URL_PATH: url_path,
+        _GENERATED_DASHBOARD_STORAGE_ID: storage_id,
+    }
+    if _generated_dashboard_registration(entry) != registration:
+        hass.config_entries.async_update_entry(
+            entry,
+            data={
+                **entry.data,
+                _GENERATED_DASHBOARD_KEY: registration,
+            },
+        )
+    _LOGGER.info(
+        "Generated HYMER dashboard for %s at %s (/%s)",
+        entry.title,
+        output_path,
+        url_path,
+    )
+
+
+async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
+    """Register integration-wide services."""
+    del config
+    has_service = (
+        hasattr(hass, "services")
+        and hasattr(hass.services, "has_service")
+        and hass.services.has_service(DOMAIN, SERVICE_GENERATE_DASHBOARD)
+    )
+    if hasattr(hass, "services") and not has_service:
+        async def _handle_service(call: Any) -> None:
+            await _async_handle_generate_dashboard_service(hass, call)
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_GENERATE_DASHBOARD,
+            _handle_service,
+        )
+    return True
 
 
 _RICH_TEMPLATE_PLATFORM_TAGS = {
@@ -607,6 +995,7 @@ async def async_setup_entry(
         )
     )
     coordinator.mark_entry_setup_complete()
+    await _async_restore_generated_dashboard(hass, entry)
     return True
 
 

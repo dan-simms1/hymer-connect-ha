@@ -332,21 +332,55 @@ generated metadata pack.
 
 ## Dashboards
 
-This repository does not ship a ready-made Home Assistant dashboard.
+This repository still does **not** ship a fixed ready-made Home Assistant
+dashboard pack.
 
-The HYMER Connect app layout is useful as a reference, but a Lovelace dashboard
-that works well on one campervan or motorhome is unlikely to fit every other
-vehicle cleanly. Different vans expose different controls, sensors, and
-component groupings.
+Different vans expose different controls, sensors, and component groupings, so
+shipping one static YAML dashboard in git would either break on many vehicles
+or lock the UI to one model.
 
-The intended approach in this branch is:
+Instead, the integration now provides a local dashboard generator service:
 
-- install the integration
-- let it create the entities that your vehicle actually exposes
-- build your own Home Assistant dashboard from those entities
+- `hymer_connect_metadata.generate_dashboard`
 
-If example dashboards are added later, they should be treated as examples to
-adapt, not as supported drop-in UI packs.
+It generates a **local Lovelace dashboard** from:
+
+- the canonical capabilities your vehicle actually resolved
+- the rich template entities the integration created
+- selected raw fallback entities where no richer abstraction exists yet
+- the locally generated runtime metadata, including component names derived
+  from your own HYMER app artefact
+
+The generated dashboard groups capabilities into app-style tabs such as:
+
+- `Dashboard`
+- `Info`
+- `Water`
+- `Light`
+- `Energy`
+- `Climate`
+- `Components`
+- `Scenarios`
+
+Typical flow:
+
+1. install the integration and let it populate entities for your vehicle
+2. call `hymer_connect_metadata.generate_dashboard` from Developer Tools
+3. the integration writes a local YAML audit copy under `/config/dashboards/hymer_connect_metadata/`
+4. the integration persists a Lovelace dashboard and adds it to the sidebar
+5. open the generated dashboard directly in Home Assistant
+
+The generated dashboard is stored locally in your Home Assistant instance, so
+it survives Home Assistant restarts. The YAML file is kept as a readable local
+copy of what was generated; it is not shipped by this repository.
+
+The output file still lives under:
+
+- `/config/dashboards/hymer_connect_metadata/`
+
+This keeps the repo free of a stale hard-coded dashboard while still letting
+the integration generate a dashboard that follows the app's grouping model as
+closely as the detected capabilities allow.
 
 ## Configuration Options
 

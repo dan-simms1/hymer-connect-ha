@@ -1,0 +1,28 @@
+generate_dashboard:
+  name: Generate Dashboard
+  description: Generate or update a local app-style Lovelace dashboard for a loaded HYMER Connect Metadata entry.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Config entry ID to generate the dashboard for. Required when multiple HYMER entries are loaded.
+      example: "9c1f8d31b8c74d2ea8ab1234567890ab"
+      selector:
+        text:
+    title:
+      name: Dashboard title
+      description: Optional Lovelace dashboard title. Defaults to "<vehicle title> Dashboard".
+      example: "Grand Canyon S 700 Dashboard"
+      selector:
+        text:
+    filename:
+      name: Filename
+      description: Optional YAML audit-copy filename stem. The dashboard is also persisted as a Lovelace storage dashboard.
+      example: "grand-canyon-s-700"
+      selector:
+        text:
+    url_path:
+      name: URL path
+      description: Optional Lovelace URL path. Defaults to the generated filename stem and is reused on restart.
+      example: "grand-canyon-s-700"
+      selector:
+        text:

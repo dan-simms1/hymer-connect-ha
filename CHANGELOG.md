@@ -6,7 +6,7 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `1.0.4` — removes tracked app OAuth client auth from the public source tree,
-  derives the required local auth material alongside the runtime metadata pack,
-  tightens setup/docs around the local-only pack, and includes the latest
-  shutdown-path cleanup for Home Assistant stop/unload
+- `1.0.5` — adds the local app-style Lovelace dashboard generator service,
+  persists generated dashboards across Home Assistant restarts, and improves
+  generated dashboard grouping for location, lights, energy, climate, and
+  summary views
