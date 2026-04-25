@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] - 2026-04-25
+
+### Fixed
+
+- **Vehicle map marker** — the vehicle location tracker now exposes a local
+  campervan SVG as its `entity_picture`, so generated dashboard map cards can
+  render a vehicle marker instead of text initials
+
+### Added
+
+- **Integration static assets** — registers a small integration-local static
+  asset path for dashboard UI assets
+
 ## [1.0.5] - 2026-04-25
 
 ### Added

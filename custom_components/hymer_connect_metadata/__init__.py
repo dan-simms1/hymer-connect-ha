@@ -45,6 +45,7 @@ from .const import (
     DOMAIN,
     MANUFACTURER,
     PLATFORMS,
+    STATIC_URL_PATH,
 )
 from .coordinator import HymerConnectCoordinator
 from .dashboard import (
@@ -83,6 +84,7 @@ _GENERATED_DASHBOARD_TITLE = "title"
 _GENERATED_DASHBOARD_FILENAME = "filename"
 _GENERATED_DASHBOARD_URL_PATH = "url_path"
 _GENERATED_DASHBOARD_STORAGE_ID = "storage_id"
+_STATIC_DIR = Path(__file__).with_name("static")
 
 HymerConnectConfigEntry = ConfigEntry
 
@@ -447,6 +449,17 @@ async def _async_handle_generate_dashboard_service(
 async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
     """Register integration-wide services."""
     del config
+    from homeassistant.components.http import StaticPathConfig
+
+    await hass.http.async_register_static_paths(
+        [
+            StaticPathConfig(
+                STATIC_URL_PATH,
+                str(_STATIC_DIR),
+                cache_headers=True,
+            )
+        ],
+    )
     has_service = (
         hasattr(hass, "services")
         and hasattr(hass.services, "has_service")

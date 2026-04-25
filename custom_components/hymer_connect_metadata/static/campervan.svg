@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Campervan">
+  <circle cx="32" cy="32" r="30" fill="#ffffff"/>
+  <path
+    d="M10 39V26c0-5 4-9 9-9h22c4 0 8 2 10 6l5 8v8H10z"
+    fill="#ffffff"
+    stroke="#111111"
+    stroke-width="4"
+    stroke-linejoin="round"
+  />
+  <path d="M18 24h13v10H16v-8c0-1 1-2 2-2z" fill="#111111"/>
+  <path d="M36 24h9l5 10H36V24z" fill="#111111"/>
+  <path d="M12 39h44" stroke="#111111" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="22" cy="43" r="6" fill="#111111"/>
+  <circle cx="47" cy="43" r="6" fill="#111111"/>
+  <circle cx="22" cy="43" r="2.5" fill="#ffffff"/>
+  <circle cx="47" cy="43" r="2.5" fill="#ffffff"/>
+</svg>

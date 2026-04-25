@@ -6,7 +6,6 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `1.0.5` — adds the local app-style Lovelace dashboard generator service,
-  persists generated dashboards across Home Assistant restarts, and improves
-  generated dashboard grouping for location, lights, energy, climate, and
-  summary views
+- `1.0.6` — adds a local campervan marker image for the vehicle tracker so
+  generated dashboard map cards can show a vehicle marker instead of text
+  initials

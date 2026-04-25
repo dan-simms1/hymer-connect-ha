@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, MANUFACTURER
+from .const import DOMAIN, MANUFACTURER, VEHICLE_ENTITY_PICTURE
 from .entity_base import entry_vehicle_display_name
 from .coordinator import HymerConnectCoordinator
 from .discovery import slot_meta
@@ -38,6 +38,7 @@ class HymerDeviceTracker(
     _attr_entity_category = None
     _attr_name = "Location"
     _attr_icon = "mdi:rv-truck"
+    _attr_entity_picture = VEHICLE_ENTITY_PICTURE
 
     def __init__(
         self,

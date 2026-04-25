@@ -2,6 +2,8 @@
 
 DOMAIN = "hymer_connect_metadata"
 MANUFACTURER = "Erwin Hymer Group"
+STATIC_URL_PATH = f"/{DOMAIN}_static"
+VEHICLE_ENTITY_PICTURE = f"{STATIC_URL_PATH}/campervan.svg"
 
 # --- Base URLs ---
 API_BASE_URL = "https://smartrv.erwinhymergroup.com"
