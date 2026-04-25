@@ -33,6 +33,10 @@ class DeviceTrackerTests(unittest.TestCase):
         self.assertEqual(entity.longitude, -0.1278)
         self.assertEqual(entity.extra_state_attributes["signal_quality"], "GOOD")
         self.assertIsNone(entity._attr_entity_category)
+        self.assertEqual(
+            entity._attr_entity_picture,
+            "/hymer_connect_metadata_static/campervan.svg",
+        )
 
 
 if __name__ == "__main__":
