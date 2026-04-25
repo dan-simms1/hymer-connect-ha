@@ -297,7 +297,35 @@ class DashboardGenerationTests(unittest.TestCase):
         energy_view = next(view for view in config["views"] if view["title"] == "Energy")
         self.assertTrue(energy_view["panel"])
         self.assertEqual(energy_view["cards"][0]["type"], "grid")
-        self.assertEqual(energy_view["cards"][0]["columns"], 2)
+        self.assertEqual(energy_view["cards"][0]["columns"], 3)
+        self.assertTrue(
+            all(
+                card["type"] == "vertical-stack"
+                for card in energy_view["cards"][0]["cards"]
+            )
+        )
+        energy_columns = energy_view["cards"][0]["cards"]
+        self.assertEqual(
+            [
+                card.get("title") or card.get("type")
+                for card in energy_columns[0]["cards"]
+            ],
+            ["Controls", "grid", "Electricity"],
+        )
+        self.assertEqual(
+            [
+                card.get("title") or card.get("type")
+                for card in energy_columns[1]["cards"]
+            ],
+            ["Power Trends", "Battery Voltages"],
+        )
+        self.assertEqual(
+            [
+                card.get("title") or card.get("type")
+                for card in energy_columns[2]["cards"]
+            ],
+            ["Solar Charging (24h)", "Solar Panel"],
+        )
         energy_cards = list(walk_cards(energy_view["cards"]))
         energy_grids = [card for card in energy_cards if card["type"] == "grid"]
         self.assertNotIn(
@@ -319,6 +347,23 @@ class DashboardGenerationTests(unittest.TestCase):
         self.assertIn("sensor", energy_card_types)
         self.assertTrue(
             any(card["type"] == "history-graph" for card in energy_cards)
+        )
+        voltage_section = next(
+            card
+            for card in energy_cards
+            if card.get("title") == "Battery Voltages"
+        )
+        voltage_graphs = [
+            card
+            for card in walk_cards(voltage_section["cards"])
+            if card.get("type") == "sensor"
+        ]
+        self.assertEqual(
+            [card["name"] for card in voltage_graphs],
+            ["Leisure Battery"],
+        )
+        self.assertFalse(
+            any(card.get("title") == "Battery Voltages (24h)" for card in energy_cards)
         )
         self.assertTrue(any(card["columns"] == 1 for card in energy_grids))
         self.assertTrue(

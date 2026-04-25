@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] - 2026-04-25
+
+### Changed
+
+- **Energy dashboard layout** — generated dashboards now split the Energy tab
+  into three functional columns for controls/readings, battery graphs, and
+  solar graphs/details
+- **Battery voltage graphs** — replaces the large multi-entity voltage history
+  graph with compact per-sensor voltage trend cards to avoid excessive blank
+  space in Home Assistant's native history graph card
+
 ## [1.0.6] - 2026-04-25
 
 ### Fixed

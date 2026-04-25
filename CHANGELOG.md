@@ -6,6 +6,6 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `1.0.6` — adds a local campervan marker image for the vehicle tracker so
-  generated dashboard map cards can show a vehicle marker instead of text
-  initials
+- `1.0.7` — refines the generated Energy dashboard layout into functional
+  columns and replaces the large battery-voltage history graph with compact
+  per-sensor voltage trend cards

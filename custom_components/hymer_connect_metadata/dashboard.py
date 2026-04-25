@@ -978,7 +978,8 @@ def _build_energy_view(
     if not items:
         return None
 
-    cards: list[dict[str, Any]] = []
+    battery_graph_cards: list[dict[str, Any]] = []
+    solar_graph_cards: list[dict[str, Any]] = []
     by_key = _items_by_source_key(items)
 
     trend_cards = [
@@ -990,7 +991,7 @@ def _build_energy_view(
     if trend_grid is not None:
         section = _section_stack("Power Trends", [trend_grid])
         if section is not None:
-            cards.append(section)
+            battery_graph_cards.append(section)
 
     solar_history = _history_graph_card(
         "Solar Charging (24h)",
@@ -998,30 +999,40 @@ def _build_energy_view(
         dashboard_title,
     )
     if solar_history is not None:
-        cards.append(solar_history)
+        solar_graph_cards.append(solar_history)
     runtime_history = _history_graph_card(
         "Battery Runtime (24h)",
         [by_key[key] for key in BATTERY_RUNTIME_KEYS if key in by_key],
         dashboard_title,
     )
     if runtime_history is not None:
-        cards.append(runtime_history)
+        battery_graph_cards.append(runtime_history)
     solar_energy = by_key.get("solar_energy")
     if solar_energy is not None:
-        cards.append(
+        solar_graph_cards.append(
             _statistics_graph_card(
                 "Solar Energy (kWh/day)",
                 solar_energy,
                 dashboard_title,
             )
         )
-    voltage_history = _history_graph_card(
-        "Battery Voltages (24h)",
-        [by_key[key] for key in ENERGY_VOLTAGE_KEYS if key in by_key],
-        dashboard_title,
+    voltage_cards = [
+        _sensor_graph_card(
+            by_key[key],
+            name=DASHBOARD_NAME_OVERRIDES.get(key, by_key[key].name),
+            icon="mdi:battery-outline",
+        )
+        for key in ENERGY_VOLTAGE_KEYS
+        if key in by_key
+    ]
+    voltage_grid = _grid_card(
+        voltage_cards,
+        columns=_responsive_columns(len(voltage_cards), maximum=3),
     )
-    if voltage_history is not None:
-        cards.append(voltage_history)
+    if voltage_grid is not None:
+        voltage_section = _section_stack("Battery Voltages", [voltage_grid])
+        if voltage_section is not None:
+            battery_graph_cards.append(voltage_section)
 
     gauges = [
         by_key[key]
@@ -1032,17 +1043,43 @@ def _build_energy_view(
         [_gauge_card(item, dashboard_title) for item in gauges],
         columns=3,
     )
-    if gauge_grid is not None:
-        cards.append(gauge_grid)
-
+    controls_cards: list[dict[str, Any]] = []
+    electricity_cards: list[dict[str, Any]] = []
+    solar_detail_cards: list[dict[str, Any]] = []
+    other_detail_cards: list[dict[str, Any]] = []
     standard_view = _build_standard_view("energy", items, dashboard_title)
     if standard_view is not None:
-        cards.extend(standard_view["cards"])
+        for card in standard_view["cards"]:
+            title = card.get("title")
+            if title == "Controls":
+                controls_cards.append(card)
+            elif title == "Electricity":
+                electricity_cards.append(card)
+            elif title in {"Solar Panel", "Gas"}:
+                solar_detail_cards.append(card)
+            else:
+                other_detail_cards.append(card)
 
-    if not cards:
+    columns = [
+        column
+        for column in (
+            _vertical_stack(
+                [
+                    *controls_cards,
+                    *([gauge_grid] if gauge_grid is not None else []),
+                    *electricity_cards,
+                ]
+            ),
+            _vertical_stack([*battery_graph_cards, *other_detail_cards]),
+            _vertical_stack([*solar_graph_cards, *solar_detail_cards]),
+        )
+        if column is not None
+    ]
+
+    if not columns:
         return None
 
-    root_grid = _grid_card(cards, columns=2)
+    root_grid = _grid_card(columns, columns=min(len(columns), 3))
     if root_grid is None:
         return None
 
