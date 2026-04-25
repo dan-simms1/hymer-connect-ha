@@ -224,16 +224,12 @@ class DashboardGenerationTests(unittest.TestCase):
             view for view in config["views"] if view["title"] == "Dashboard"
         )
         dashboard_cards = list(walk_cards(dashboard_view["cards"]))
-        self.assertTrue(dashboard_view["panel"])
-        dashboard_root_grid = next(
-            card
-            for card in dashboard_cards
-            if card.get("type") == "grid"
-            and card.get("columns") == 3
-            and any(
-                child.get("title") == "Main Actions"
-                for child in card.get("cards", [])
-            )
+        self.assertNotIn("panel", dashboard_view)
+        root_cards = dashboard_view["cards"]
+        self.assertEqual(len(root_cards), 3)
+        self.assertEqual(
+            [card.get("title") or card.get("type") for card in root_cards],
+            ["Main Actions", "vertical-stack", "grid"],
         )
         action_entities = next(
             card["entities"]
@@ -246,7 +242,6 @@ class DashboardGenerationTests(unittest.TestCase):
             "Status",
             [card.get("title") for card in dashboard_cards],
         )
-        root_cards = dashboard_root_grid["cards"]
         self.assertEqual(root_cards[0].get("title"), "Main Actions")
         self.assertEqual(root_cards[1]["type"], "vertical-stack")
         self.assertIsNone(root_cards[2].get("title"))
@@ -295,16 +290,15 @@ class DashboardGenerationTests(unittest.TestCase):
         self.assertEqual(dashboard_climate_grid["columns"], 1)
 
         energy_view = next(view for view in config["views"] if view["title"] == "Energy")
-        self.assertTrue(energy_view["panel"])
-        self.assertEqual(energy_view["cards"][0]["type"], "grid")
-        self.assertEqual(energy_view["cards"][0]["columns"], 3)
+        self.assertNotIn("panel", energy_view)
         self.assertTrue(
             all(
                 card["type"] == "vertical-stack"
-                for card in energy_view["cards"][0]["cards"]
+                for card in energy_view["cards"]
             )
         )
-        energy_columns = energy_view["cards"][0]["cards"]
+        energy_columns = energy_view["cards"]
+        self.assertEqual(len(energy_columns), 3)
         self.assertEqual(
             [
                 card.get("title") or card.get("type")
@@ -428,8 +422,11 @@ class DashboardGenerationTests(unittest.TestCase):
         )
 
         climate_view = next(view for view in config["views"] if view["title"] == "Climate")
-        self.assertTrue(climate_view["panel"])
-        self.assertEqual(climate_view["cards"][0]["type"], "grid")
+        self.assertNotIn("panel", climate_view)
+        self.assertEqual(
+            [card.get("title") for card in climate_view["cards"]],
+            ["Heater", "Warm Water"],
+        )
         heater_section = next(
             card
             for card in walk_cards(climate_view["cards"])
