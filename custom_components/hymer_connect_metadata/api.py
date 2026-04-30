@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
@@ -32,6 +33,8 @@ from .runtime_metadata import load_oauth_basic_auth_header
 
 _LOGGER = logging.getLogger(__name__)
 
+TokenUpdateCallback = Callable[[str, str], None]
+
 
 class HymerConnectApiError(Exception):
     """Base exception for API errors."""
@@ -56,6 +59,7 @@ class HymerConnectApi:
         self._locale = locale
         self._access_token: str | None = None
         self._refresh_token: str | None = None
+        self._token_update_callback: TokenUpdateCallback | None = None
 
     @property
     def access_token(self) -> str | None:
@@ -67,10 +71,31 @@ class HymerConnectApi:
         """Return True if we have an access token."""
         return self._access_token is not None
 
+    @property
+    def refresh_token(self) -> str | None:
+        """Return the current OAuth refresh token."""
+        return self._refresh_token
+
     def set_tokens(self, access_token: str, refresh_token: str) -> None:
         """Set auth tokens directly (from stored config)."""
         self._access_token = access_token
         self._refresh_token = refresh_token
+
+    def set_token_update_callback(
+        self,
+        callback: TokenUpdateCallback | None,
+    ) -> None:
+        """Install a callback used to persist rotated OAuth tokens."""
+        self._token_update_callback = callback
+
+    def _notify_tokens_updated(self) -> None:
+        """Notify the owner when OAuth tokens have changed."""
+        if (
+            self._token_update_callback is not None
+            and self._access_token
+            and self._refresh_token
+        ):
+            self._token_update_callback(self._access_token, self._refresh_token)
 
     @staticmethod
     def _is_closed_client_error(err: RuntimeError) -> bool:
@@ -190,6 +215,7 @@ class HymerConnectApi:
                 if "access_token" in result:
                     self._access_token = result["access_token"]
                     self._refresh_token = result.get("refresh_token")
+                    self._notify_tokens_updated()
                     return {
                         "access_token": self._access_token,
                         "refresh_token": self._refresh_token or "",
@@ -227,13 +253,18 @@ class HymerConnectApi:
                     _LOGGER.warning(
                         "Token refresh failed %s: %s", resp.status, text[:200]
                     )
-                    raise HymerConnectAuthError("Token refresh failed")
+                    if resp.status in (400, 401, 403):
+                        raise HymerConnectAuthError("Token refresh failed")
+                    raise HymerConnectApiError(
+                        f"Token refresh temporarily failed: {resp.status}"
+                    )
                 result = await resp.json()
                 if "access_token" in result:
                     self._access_token = result["access_token"]
                     self._refresh_token = result.get(
                         "refresh_token", self._refresh_token
                     )
+                    self._notify_tokens_updated()
                     return
         except aiohttp.ClientError as err:
             raise HymerConnectApiError(f"Connection error: {err}") from err

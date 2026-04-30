@@ -110,6 +110,72 @@ def _dashboard_storage_id(entry: HymerConnectConfigEntry) -> str:
     return f"{DOMAIN}_{entry.entry_id.lower()}"
 
 
+def _persist_oauth_tokens(
+    hass: HomeAssistant,
+    entry: HymerConnectConfigEntry,
+    access_token: str,
+    refresh_token: str,
+) -> None:
+    """Persist OAuth token rotation back to the config entry."""
+    if not access_token or not refresh_token:
+        return
+    if (
+        entry.data.get(CONF_ACCESS_TOKEN) == access_token
+        and entry.data.get(CONF_REFRESH_TOKEN) == refresh_token
+    ):
+        return
+    hass.config_entries.async_update_entry(
+        entry,
+        data={
+            **entry.data,
+            CONF_ACCESS_TOKEN: access_token,
+            CONF_REFRESH_TOKEN: refresh_token,
+        },
+    )
+
+
+async def _async_prepare_authenticated_api(
+    hass: HomeAssistant,
+    entry: HymerConnectConfigEntry,
+    api: HymerConnectApi,
+) -> None:
+    """Prepare an API client using app-like refresh-first auth behavior."""
+    api.set_token_update_callback(
+        partial(_persist_oauth_tokens, hass, entry)
+    )
+
+    stored_access_token = entry.data.get(CONF_ACCESS_TOKEN)
+    stored_refresh_token = entry.data.get(CONF_REFRESH_TOKEN)
+    if stored_access_token and stored_refresh_token:
+        api.set_tokens(stored_access_token, stored_refresh_token)
+        try:
+            await api.get_account()
+            return
+        except HymerConnectAuthError:
+            _LOGGER.info(
+                "Stored HYMER OAuth tokens could not be refreshed; "
+                "falling back to credential login"
+            )
+        except HymerConnectApiError as err:
+            raise ConfigEntryNotReady(
+                f"Cannot connect to HYMER API: {err}"
+            ) from err
+
+    if CONF_USERNAME not in entry.data or CONF_PASSWORD not in entry.data:
+        raise ConfigEntryAuthFailed("No credentials available")
+
+    try:
+        await api.authenticate(entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD])
+    except HymerConnectAuthError as err:
+        raise ConfigEntryAuthFailed(
+            f"Authentication failed: {err}"
+        ) from err
+    except HymerConnectApiError as err:
+        raise ConfigEntryNotReady(
+            f"Cannot connect to HYMER API: {err}"
+        ) from err
+
+
 def _dashboard_config_dir(hass: HomeAssistant) -> Path:
     return (
         Path(hass.config.path())
@@ -930,32 +996,7 @@ async def async_setup_entry(
     session = async_get_clientsession(hass)
     brand = entry.data.get(CONF_BRAND, "hymer")
     api = HymerConnectApi(session, brand=brand)
-
-    # Always re-authenticate with stored credentials to get fresh tokens
-    if CONF_USERNAME in entry.data:
-        try:
-            tokens = await api.authenticate(
-                entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD]
-            )
-            # Update stored tokens
-            hass.config_entries.async_update_entry(
-                entry,
-                data={
-                    **entry.data,
-                    CONF_ACCESS_TOKEN: tokens["access_token"],
-                    CONF_REFRESH_TOKEN: tokens["refresh_token"],
-                },
-            )
-        except HymerConnectAuthError as err:
-            raise ConfigEntryAuthFailed(
-                f"Authentication failed: {err}"
-            ) from err
-        except HymerConnectApiError as err:
-            raise ConfigEntryNotReady(
-                f"Cannot connect to HYMER API: {err}"
-            ) from err
-    else:
-        raise ConfigEntryAuthFailed("No credentials available")
+    await _async_prepare_authenticated_api(hass, entry, api)
 
     vehicle_urn = entry.data.get(CONF_VEHICLE_URN, "")
     scu_urn = entry.data.get(CONF_SCU_URN, "")
