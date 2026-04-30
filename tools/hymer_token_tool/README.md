@@ -163,6 +163,18 @@ hymer-token-tool validate-remote-refresh \
   --remote-refresh-token '...'
 ```
 
+Extract a remote-access refresh token from a local text capture, JSON dump, or
+copied proxy output:
+
+```bash
+hymer-token-tool extract-remote-refresh --input-file capture.txt
+```
+
+The extractor scans local text for JWT-shaped values and keeps the first token
+whose decoded payload has `ett=access-refresh`. It writes the token to
+`remote-access-refresh-token.txt` using restrictive file permissions. The token
+is not printed to stdout unless you explicitly pass `--print-token`.
+
 Scan nearby BLE devices:
 
 ```bash

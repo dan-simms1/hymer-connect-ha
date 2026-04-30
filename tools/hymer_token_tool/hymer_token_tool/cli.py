@@ -25,6 +25,11 @@ from .scu import (
     default_mobile_device_name,
 )
 from .tls import TlsSupportError, run_tls_loopback_self_test
+from .tokens import (
+    coerce_remote_access_refresh_token,
+    decode_jwt_without_verification,
+    find_remote_access_refresh_token,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -63,6 +68,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_remote.add_argument("--vehicle-urn", required=True)
     validate_remote.add_argument("--remote-refresh-token", required=True)
+
+    extract_remote = subparsers.add_parser("extract-remote-refresh")
+    extract_remote.add_argument("--input-file", type=Path)
+    extract_remote.add_argument(
+        "--token-file",
+        type=Path,
+        default=Path("remote-access-refresh-token.txt"),
+    )
+    extract_remote.add_argument("--print-token", action="store_true")
+    extract_remote.add_argument("--json", action="store_true", dest="json_output")
 
     ble_scan = subparsers.add_parser("ble-scan")
     ble_scan.add_argument("--timeout", type=float, default=8.0)
@@ -176,24 +191,8 @@ def _value_from_cli_or_ini(args: argparse.Namespace, key: str) -> str | None:
     return text or None
 
 
-def _pad_base64(value: str) -> str:
-    return value + "=" * (-len(value) % 4)
-
-
 def _decode_jwt_without_verification(token: str) -> dict[str, Any]:
-    parts = token.split(".")
-    if len(parts) < 2:
-        return {}
-    try:
-        header = json.loads(
-            __import__("base64").urlsafe_b64decode(_pad_base64(parts[0])).decode("utf-8")
-        )
-        payload = json.loads(
-            __import__("base64").urlsafe_b64decode(_pad_base64(parts[1])).decode("utf-8")
-        )
-    except Exception:
-        return {}
-    return {"header": header, "payload": payload}
+    return decode_jwt_without_verification(token)
 
 
 def _format_vehicle(vehicle: VehicleRecord, index: int) -> str:
@@ -496,9 +495,12 @@ async def command_inspect_activation(args: argparse.Namespace) -> int:
 async def command_validate_remote_refresh(args: argparse.Namespace) -> int:
     client, _, _ = await _with_client(args)
     try:
+        remote_refresh_token = coerce_remote_access_refresh_token(
+            args.remote_refresh_token
+        )
         access_token = await client.get_remote_access_token(
             args.vehicle_urn,
-            args.remote_refresh_token,
+            remote_refresh_token,
         )
         decoded = _decode_jwt_without_verification(access_token)
         payload = {
@@ -518,6 +520,43 @@ async def command_validate_remote_refresh(args: argparse.Namespace) -> int:
         return 0
     finally:
         await client._session.close()
+
+
+async def command_extract_remote_refresh(args: argparse.Namespace) -> int:
+    if args.input_file:
+        text = args.input_file.read_text(encoding="utf-8", errors="replace")
+        source = str(args.input_file)
+    else:
+        text = sys.stdin.read()
+        source = "stdin"
+    token = find_remote_access_refresh_token(text)
+    if token is None:
+        raise HymerTokenToolError(
+            "No EHG remote-access refresh token was found in the input"
+        )
+    decoded = decode_jwt_without_verification(token)
+    _write_secret_text_file(args.token_file, token)
+    payload = {
+        "source": source,
+        "found": True,
+        "token_file": str(args.token_file),
+        "decoded": decoded,
+    }
+    if args.print_token:
+        payload["remote_refresh_token"] = token
+    if args.json_output:
+        print(_json_dump(payload))
+    else:
+        print(f"Remote refresh token written to: {args.token_file}")
+        token_payload = decoded.get("payload", {})
+        for key in ("urn", "sub", "ett", "client_id"):
+            if key in token_payload:
+                print(f"{key}: {token_payload[key]}")
+        if args.print_token:
+            print(token)
+        else:
+            print("Token value suppressed. Use --print-token only if you need stdout output.")
+    return 0
 
 
 async def command_ble_scan(args: argparse.Namespace) -> int:
@@ -768,6 +807,8 @@ async def async_main(args: argparse.Namespace) -> int:
         return await command_inspect_activation(args)
     if args.command == "validate-remote-refresh":
         return await command_validate_remote_refresh(args)
+    if args.command == "extract-remote-refresh":
+        return await command_extract_remote_refresh(args)
     if args.command == "ble-scan":
         return await command_ble_scan(args)
     if args.command == "ble-probe":

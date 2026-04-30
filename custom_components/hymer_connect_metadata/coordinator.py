@@ -35,6 +35,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
+from .discovery import all_slots
 from .signalr_client import HymerSignalRClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -640,6 +641,7 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ehg_refresh_token=self._ehg_refresh_token,
                 on_sensor_update=self._on_signalr_update,
                 on_connection_lost=self._on_signalr_connection_lost,
+                known_slots=set(all_slots()),
             )
             self._signalr = client
 

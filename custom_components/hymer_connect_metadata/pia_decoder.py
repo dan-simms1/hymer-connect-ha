@@ -207,7 +207,11 @@ def build_refresh_command() -> str:
     return base64.b64encode(payload).decode("ascii")
 
 
-def decode_pia_slots(b64_payload: str) -> dict[tuple[int, int], Any]:
+def decode_pia_slots(
+    b64_payload: str,
+    *,
+    known_slots: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
+) -> dict[tuple[int, int], Any]:
     """Decode a PiaResponse into slot-keyed raw values.
 
     Returns a dict keyed by (bus_id, sensor_id).  Values are untransformed —
@@ -219,16 +223,20 @@ def decode_pia_slots(b64_payload: str) -> dict[tuple[int, int], Any]:
     except Exception:
         _LOGGER.warning("Failed to base64-decode PIA payload")
         return {}
-    return decode_pia_slots_bytes(raw)
+    return decode_pia_slots_bytes(raw, known_slots=known_slots)
 
 
-def decode_pia_slots_bytes(raw: bytes) -> dict[tuple[int, int], Any]:
+def decode_pia_slots_bytes(
+    raw: bytes,
+    *,
+    known_slots: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
+) -> dict[tuple[int, int], Any]:
     """Decode raw protobuf bytes containing slot entries."""
     slots: dict[tuple[int, int], Any] = {}
     for fn, wt, v in _decode_protobuf(raw):
         if wt != 2 or not isinstance(v, bytes):
             continue
-        _extract_slots_recursive(v, slots, depth=0)
+        _extract_slots_recursive(v, slots, depth=0, known_slots=known_slots)
     return slots
 
 
@@ -254,12 +262,18 @@ def decode_transport_response(b64_payload: str) -> dict[str, Any] | None:
 
 
 def _extract_slots_recursive(
-    data: bytes, slots: dict[tuple[int, int], Any], depth: int
+    data: bytes,
+    slots: dict[tuple[int, int], Any],
+    depth: int,
+    *,
+    known_slots: set[tuple[int, int]] | frozenset[tuple[int, int]] | None,
 ) -> None:
     """Recursively search for sensor entries, storing by (bus_id, sensor_id).
 
     Mirrors _extract_sensors_recursive but skips the name lookup and stores
-    raw values.  Applies the same depth ≤ 3 filter and sentinel discard.
+    raw values. Depth 4 entries are accepted only when the local runtime
+    metadata pack knows the slot; this keeps the phantom-wrapper guard while
+    allowing deeper real-time SCU push frames for known capabilities.
     """
     if depth > 5:
         return
@@ -272,7 +286,13 @@ def _extract_slots_recursive(
     if has_sid and has_bus and has_value:
         sid_val = next((v for fn, wt, v in fields if fn == 1 and wt == 0), 0)
         bus_val = next((v for fn, wt, v in fields if fn == 2 and wt == 0), 0)
-        if sid_val < 1000 and bus_val < 1000 and depth <= 3:
+        slot_key = (bus_val, sid_val)
+        known_depth4_slot = (
+            depth == 4
+            and known_slots is not None
+            and slot_key in known_slots
+        )
+        if sid_val < 1000 and bus_val < 1000 and (depth <= 3 or known_depth4_slot):
             entry = _parse_sensor_entry(data)
             if entry and entry["value"] is not None:
                 val = entry["value"]
@@ -282,7 +302,12 @@ def _extract_slots_recursive(
             return
     for fn, wt, v in fields:
         if wt == 2 and isinstance(v, bytes) and len(v) > 2:
-            _extract_slots_recursive(v, slots, depth + 1)
+            _extract_slots_recursive(
+                v,
+                slots,
+                depth + 1,
+                known_slots=known_slots,
+            )
 
 
 def _encode_varint(value: int) -> bytes:
