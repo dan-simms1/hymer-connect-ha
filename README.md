@@ -310,6 +310,19 @@ The token tool now reads the same locally generated `oauth_client.json` file as
 the integration, so you should run the metadata-preparation step at least once
 from the same repository checkout before using the tool.
 
+It also includes a local helper for extracting an EHG remote-access refresh token
+from text you already captured yourself:
+
+```bash
+hymer-token-tool extract-remote-refresh --input-file capture.txt
+```
+
+That helper scans for JWT-shaped strings, decodes them locally without signature
+verification, and keeps the first token whose payload identifies it as
+`ett=access-refresh`. It writes the token to `remote-access-refresh-token.txt`
+with restrictive file permissions and does not print the token unless you pass
+`--print-token`.
+
 ## What You Can Expect To See In Home Assistant
 
 Depending on the selected campervan or motorhome and the data it reports, the
@@ -329,6 +342,13 @@ surface entities for:
 
 Coverage depends on the actual vehicle, fitted hardware, and the locally
 generated metadata pack.
+
+Some passive state changes depend on how the SCU reports data to the cloud. The
+cloud / SignalR path can lag behind the app for sensors the app reads directly
+over local BLE, such as fridge-door state on some vehicles. This branch now
+accepts deeper known metadata slots from real-time cloud frames, but if a sensor
+is only exposed over BLE by a given SCU firmware it will remain stale in Home
+Assistant until a future BLE path is implemented.
 
 ## Dashboards
 

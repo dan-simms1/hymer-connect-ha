@@ -748,6 +748,30 @@ class GeneratorAndEntityTests(unittest.TestCase):
             [(3, 0, 1765109862890)],
         )
 
+    def test_decode_pia_slots_accepts_known_depth_four_slots_only(self) -> None:
+        ensure_package_paths()
+        pia_decoder = importlib.import_module("custom_components.hymer_connect_metadata.pia_decoder")
+
+        sensor = (
+            pia_decoder._encode_varint_field(1, 14)
+            + pia_decoder._encode_varint_field(2, 58)
+            + pia_decoder._encode_varint_field(5, 1)
+        )
+        nested = sensor
+        for _ in range(4):
+            nested = pia_decoder._encode_bytes_field(9, nested)
+        raw = pia_decoder._encode_bytes_field(2, nested)
+
+        self.assertEqual(pia_decoder.decode_pia_slots_bytes(raw), {})
+        self.assertEqual(
+            pia_decoder.decode_pia_slots_bytes(raw, known_slots={(58, 14)}),
+            {(58, 14): True},
+        )
+        self.assertEqual(
+            pia_decoder.decode_pia_slots_bytes(raw, known_slots={(58, 15)}),
+            {},
+        )
+
     def test_signalr_stop_cancels_token_refresh_task(self) -> None:
         ensure_package_paths()
         signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")

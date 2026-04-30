@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- **Metadata-aware deep PIA decoding** — known locally generated metadata slots
+  are now accepted from deeper real-time cloud frames, while unknown depth-4
+  wrapper-like entries remain filtered to avoid phantom slot values
+- **Remote refresh token extraction helper** — the early-alpha desktop token
+  tool can scan a local text capture for JWT-shaped tokens and write the first
+  `ett=access-refresh` token to a local secret file without printing it by
+  default
+
+### Changed
+
+- **Passive sensor documentation** — README now explains that some app-visible
+  passive sensor changes may be BLE-only on some SCU firmware even when the
+  cloud decoder accepts deeper known slots
+
 ## [1.0.8] - 2026-04-26
 
 ### Changed

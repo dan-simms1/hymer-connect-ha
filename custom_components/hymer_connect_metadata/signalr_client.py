@@ -76,6 +76,7 @@ class HymerSignalRClient:
         ehg_refresh_token: str = "",
         on_sensor_update: Callable[[dict[tuple[int, int], Any]], None] | None = None,
         on_connection_lost: Callable[[], None] | None = None,
+        known_slots: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
     ) -> None:
         """Initialize the SignalR client."""
         self._api = api
@@ -100,6 +101,7 @@ class HymerSignalRClient:
         self._pending_requests: dict[int, _PendingPiaRequest] = {}
         self._waiting_request_ids: list[int] = []
         self._token_refresh_task: asyncio.Task | None = None
+        self._known_slots = frozenset(known_slots or ())
 
     @property
     def connected(self) -> bool:
@@ -501,9 +503,15 @@ class HymerSignalRClient:
 
             slot_data: dict[tuple[int, int], Any] = {}
             if isinstance(payload, bytes):
-                slot_data = decode_pia_slots_bytes(payload)
+                slot_data = decode_pia_slots_bytes(
+                    payload,
+                    known_slots=self._known_slots,
+                )
             else:
-                slot_data = decode_pia_slots(b64_payload)
+                slot_data = decode_pia_slots(
+                    b64_payload,
+                    known_slots=self._known_slots,
+                )
 
             if slot_data:
                 self._slot_data.update(slot_data)
