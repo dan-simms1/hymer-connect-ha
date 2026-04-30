@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import unittest
 
@@ -32,6 +33,52 @@ class ApiTitleTests(unittest.TestCase):
             }
         )
         self.assertEqual(title, "ML-T 580")
+
+
+class _RefreshResponse:
+    def __init__(self, status: int, body: str = "") -> None:
+        self.status = status
+        self._body = body
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    async def text(self) -> str:
+        return self._body
+
+    async def json(self) -> dict[str, str]:
+        return {
+            "access_token": "new-access",
+            "refresh_token": "new-refresh",
+        }
+
+
+class _RefreshSession:
+    def __init__(self, response: _RefreshResponse) -> None:
+        self.response = response
+
+    def request(self, *_args, **_kwargs) -> _RefreshResponse:
+        return self.response
+
+
+class ApiRefreshTests(unittest.TestCase):
+    def test_token_refresh_server_error_is_temporary_api_error(self) -> None:
+        client = api.HymerConnectApi(_RefreshSession(_RefreshResponse(502)))
+        client.set_tokens("old-access", "old-refresh")
+
+        with self.assertRaises(api.HymerConnectApiError) as err:
+            asyncio.run(client._refresh_access_token())
+        self.assertNotIsInstance(err.exception, api.HymerConnectAuthError)
+
+    def test_token_refresh_rejected_token_is_auth_error(self) -> None:
+        client = api.HymerConnectApi(_RefreshSession(_RefreshResponse(401)))
+        client.set_tokens("old-access", "old-refresh")
+
+        with self.assertRaises(api.HymerConnectAuthError):
+            asyncio.run(client._refresh_access_token())
 
 
 if __name__ == "__main__":
