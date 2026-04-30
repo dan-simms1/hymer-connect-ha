@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [1.0.9] - 2026-04-30
 
 ### Added
 
@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Passive sensor documentation** — README now explains that some app-visible
   passive sensor changes may be BLE-only on some SCU firmware even when the
   cloud decoder accepts deeper known slots
+
+### Fixed
+
+- **Display-unit options on newer Home Assistant cores** — config-entry options
+  exposed as read-only mappings are now honoured, so the generated dashboard
+  and integration entities consistently show mile/temperature/admin/debug
+  preferences after reload
 
 ## [1.0.8] - 2026-04-26
 

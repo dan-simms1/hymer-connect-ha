@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from homeassistant.const import UnitOfTemperature
@@ -16,9 +17,9 @@ from .const import (
 _MILES_PER_KILOMETER = 0.621371192237334
 
 
-def _entry_options(entry: Any) -> dict[str, Any]:
+def _entry_options(entry: Any) -> Mapping[str, Any]:
     options = getattr(entry, "options", None)
-    return options if isinstance(options, dict) else {}
+    return options if isinstance(options, Mapping) else {}
 
 
 def debug_diagnostics_enabled(entry: Any) -> bool:

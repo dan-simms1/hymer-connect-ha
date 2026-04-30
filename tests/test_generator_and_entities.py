@@ -10,7 +10,7 @@ import types
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from unittest import mock
 from zipfile import ZipFile
 
@@ -265,6 +265,14 @@ class GeneratorAndEntityTests(unittest.TestCase):
                 "km",
                 SimpleNamespace(options={"use_miles": True}),
             ),
+            6.21371192237334,
+        )
+        mapping_entry = SimpleNamespace(
+            options=MappingProxyType({"use_miles": True})
+        )
+        self.assertEqual(preferences.display_unit("km", mapping_entry), "mi")
+        self.assertAlmostEqual(
+            preferences.display_value(10.0, "km", mapping_entry),
             6.21371192237334,
         )
         self.assertAlmostEqual(
