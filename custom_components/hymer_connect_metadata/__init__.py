@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from functools import partial
 import logging
 from pathlib import Path
@@ -54,6 +55,7 @@ from .dashboard import (
     write_dashboard_storage,
     write_dashboard_yaml,
 )
+from .diagnostics import build_slot_debug_report
 from .repairs import (
     async_create_missing_runtime_metadata_issue,
     async_delete_missing_runtime_metadata_issue,
@@ -67,7 +69,7 @@ from .entity_base import (
     slot_entity_hidden_by_default,
     slot_entity_name_override,
 )
-from .preferences import admin_actions_enabled, use_miles
+from .preferences import admin_actions_enabled, debug_diagnostics_enabled, use_miles
 from .runtime_metadata import (
     RuntimeMetadataMissingError,
     ensure_runtime_metadata_present,
@@ -84,6 +86,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORM_LIST = [Platform(p) for p in PLATFORMS]
 SERVICE_GENERATE_DASHBOARD = "generate_dashboard"
+SERVICE_EXPORT_SLOT_DEBUG_REPORT = "export_slot_debug_report"
 _GENERATED_DASHBOARD_KEY = "generated_dashboard"
 _GENERATED_DASHBOARD_TITLE = "title"
 _GENERATED_DASHBOARD_FILENAME = "filename"
@@ -113,6 +116,35 @@ def _dashboard_slug(value: str) -> str:
 
 def _dashboard_storage_id(entry: HymerConnectConfigEntry) -> str:
     return f"{DOMAIN}_{entry.entry_id.lower()}"
+
+
+def _entry_for_service_call(
+    loaded_entries: dict[str, HymerConnectCoordinator],
+    requested_entry_id: str | None,
+) -> HymerConnectCoordinator:
+    """Resolve a loaded coordinator from a service call entry_id."""
+    if not loaded_entries:
+        raise HomeAssistantError(
+            "No loaded HYMER Connect Metadata entries are available"
+        )
+    if requested_entry_id:
+        coordinator = loaded_entries.get(requested_entry_id)
+        if coordinator is None:
+            raise HomeAssistantError(
+                f"HYMER entry '{requested_entry_id}' is not currently loaded"
+            )
+        return coordinator
+    if len(loaded_entries) == 1:
+        return next(iter(loaded_entries.values()))
+    raise HomeAssistantError(
+        "Multiple HYMER entries are loaded; specify entry_id"
+    )
+
+
+def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
+    """Write a JSON file with parent directory creation."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n")
 
 
 def _persist_oauth_tokens(
@@ -396,24 +428,8 @@ async def _async_handle_generate_dashboard_service(
     call: Any,
 ) -> None:
     loaded_entries = hass.data.get(DOMAIN, {})
-    if not loaded_entries:
-        raise HomeAssistantError(
-            "No loaded HYMER Connect Metadata entries are available"
-        )
-
     requested_entry_id = call.data.get("entry_id") if hasattr(call, "data") else None
-    if requested_entry_id:
-        coordinator = loaded_entries.get(requested_entry_id)
-        if coordinator is None:
-            raise HomeAssistantError(
-                f"HYMER entry '{requested_entry_id}' is not currently loaded"
-            )
-    elif len(loaded_entries) == 1:
-        coordinator = next(iter(loaded_entries.values()))
-    else:
-        raise HomeAssistantError(
-            "Multiple HYMER entries are loaded; specify entry_id"
-        )
+    coordinator = _entry_for_service_call(loaded_entries, requested_entry_id)
 
     entry = getattr(coordinator, "config_entry", None)
     if entry is None:
@@ -517,6 +533,44 @@ async def _async_handle_generate_dashboard_service(
     )
 
 
+async def _async_handle_export_slot_debug_report_service(
+    hass: HomeAssistant,
+    call: Any,
+) -> None:
+    loaded_entries = hass.data.get(DOMAIN, {})
+    requested_entry_id = call.data.get("entry_id") if hasattr(call, "data") else None
+    coordinator = _entry_for_service_call(loaded_entries, requested_entry_id)
+
+    entry = getattr(coordinator, "config_entry", None)
+    if entry is None:
+        raise HomeAssistantError(
+            "The loaded HYMER entry does not expose config entry metadata"
+        )
+    if not debug_diagnostics_enabled(entry):
+        _LOGGER.warning(
+            "HYMER slot debug report export skipped for %s because "
+            "'Show debug diagnostics' is disabled",
+            entry.title,
+        )
+        return
+
+    filename = call.data.get("filename") if hasattr(call, "data") else None
+    stem = filename or f"{entry.title or entry.entry_id}-slot-debug"
+    output_path = (
+        _dashboard_config_dir(hass)
+        / DOMAIN
+        / "debug_slots"
+        / f"{_dashboard_slug(stem)}.json"
+    )
+    report = build_slot_debug_report(entry, coordinator)
+    await hass.async_add_executor_job(_write_json_file, output_path, report)
+    _LOGGER.info(
+        "Exported HYMER slot debug report for %s at %s",
+        entry.title,
+        output_path,
+    )
+
+
 async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
     """Register integration-wide services."""
     del config
@@ -531,19 +585,34 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
             )
         ],
     )
-    has_service = (
+    has_dashboard_service = (
         hasattr(hass, "services")
         and hasattr(hass.services, "has_service")
         and hass.services.has_service(DOMAIN, SERVICE_GENERATE_DASHBOARD)
     )
-    if hasattr(hass, "services") and not has_service:
-        async def _handle_service(call: Any) -> None:
+    if hasattr(hass, "services") and not has_dashboard_service:
+        async def _handle_dashboard_service(call: Any) -> None:
             await _async_handle_generate_dashboard_service(hass, call)
 
         hass.services.async_register(
             DOMAIN,
             SERVICE_GENERATE_DASHBOARD,
-            _handle_service,
+            _handle_dashboard_service,
+        )
+
+    has_slot_debug_service = (
+        hasattr(hass, "services")
+        and hasattr(hass.services, "has_service")
+        and hass.services.has_service(DOMAIN, SERVICE_EXPORT_SLOT_DEBUG_REPORT)
+    )
+    if hasattr(hass, "services") and not has_slot_debug_service:
+        async def _handle_slot_debug_service(call: Any) -> None:
+            await _async_handle_export_slot_debug_report_service(hass, call)
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_EXPORT_SLOT_DEBUG_REPORT,
+            _handle_slot_debug_service,
         )
     return True
 

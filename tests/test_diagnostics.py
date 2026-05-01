@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import sys
 import time
 import unittest
@@ -72,7 +73,7 @@ class DiagnosticsTests(unittest.TestCase):
 
         diagnostics.async_redact_data = redact
 
-        coordinator.slot_data[(30, 5)] = "53.6513049,-1.325278233"
+        coordinator.slot_data[(30, 5)] = "0.000000,0.000000"
         coordinator.active_slots.add((30, 5))
         coordinator.observed_slots.add((30, 5))
         coordinator.slot_last_seen[(30, 5)] = time.monotonic()
@@ -130,7 +131,7 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["stale_slots"][0]["slot"], [2, 8])
         redacted_gps = diagnostics._slot_snapshot(
             (30, 1),
-            "53.6513049,-1.325278233",
+            "0.000000,0.000000",
         )
         self.assertIn(redacted_gps["label"], {"gps_coordinates", "gps_location"})
         self.assertEqual(redacted_gps["value"], "[redacted]")
@@ -149,6 +150,48 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(fresh["capability_evidence_sources"], ["registry", "bundle"])
         self.assertEqual(fresh["provider_read_validation_status"], "inferred")
         self.assertEqual(fresh["provider_write_validation_status"], "not_applicable")
+
+    def test_slot_debug_report_lists_metadata_gaps_without_values(self) -> None:
+        install_homeassistant_stubs()
+        sys.modules.pop("custom_components.hymer_connect_metadata.diagnostics", None)
+        ensure_package_paths()
+        diagnostics = importlib.import_module("custom_components.hymer_connect_metadata.diagnostics")
+
+        coordinator = type(
+            "Coordinator",
+            (),
+            {
+                "observed_slots": {(3, 8), (999, 1), (2, 8)},
+                "active_slots": {(3, 8), (999, 1)},
+                "stale_slots": {(2, 8)},
+                "slot_data": {
+                    (3, 8): 42,
+                    (999, 1): "do-not-export",
+                    (30, 5): "0.000000,0.000000",
+                },
+                "active_slot_window_seconds": 1800,
+            },
+        )()
+        entry = type(
+            "Entry",
+            (),
+            {
+                "entry_id": "entry-1",
+                "title": "Test Van",
+                "data": {},
+            },
+        )()
+
+        payload = diagnostics.build_slot_debug_report(entry, coordinator)
+        rendered = json.dumps(payload)
+
+        self.assertEqual(payload["active_unknown_slot_count"], 1)
+        self.assertEqual(payload["active_unknown_slots"][0]["slot"], [999, 1])
+        self.assertFalse(payload["active_unknown_slots"][0]["metadata_present"])
+        self.assertEqual(payload["active_audit_missing_slots"][0]["slot"], [999, 1])
+        self.assertNotIn("do-not-export", rendered)
+        self.assertNotIn("0.000000", rendered)
+        self.assertNotIn('"value"', rendered)
 
 
 if __name__ == "__main__":

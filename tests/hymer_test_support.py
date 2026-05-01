@@ -249,6 +249,11 @@ def install_homeassistant_stubs() -> None:
     exceptions.ConfigEntryAuthFailed = type("ConfigEntryAuthFailed", (Exception,), {})
     exceptions.ConfigEntryNotReady = type("ConfigEntryNotReady", (Exception,), {})
     exceptions.HomeAssistantError = type("HomeAssistantError", (Exception,), {})
+    exceptions.ServiceValidationError = type(
+        "ServiceValidationError",
+        (exceptions.HomeAssistantError,),
+        {},
+    )
 
     entity_helper = module("homeassistant.helpers.entity")
     entity_helper.EntityCategory = types.SimpleNamespace(

@@ -449,6 +449,13 @@ The options flow currently supports:
 Admin actions are hidden by default. That includes the Smart Unit restart
 button.
 
+When debug diagnostics are enabled, the
+`hymer_connect_metadata.export_slot_debug_report` service can write a local
+JSON report under `/config/hymer_connect_metadata/debug_slots/`. The report is
+for capability investigation only: it lists observed slot IDs, whether each
+slot is known to the local metadata pack, and metadata labels/categories where
+available. It intentionally does not include live returned slot values.
+
 ## Limits Of This Branch
 
 - It is not as widely tested as Jan's upstream integration.

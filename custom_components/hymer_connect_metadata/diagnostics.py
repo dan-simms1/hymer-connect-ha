@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import logging
 from typing import Any
 
@@ -84,6 +85,99 @@ def _slot_snapshot(slot: tuple[int, int], value: Any) -> dict[str, Any]:
         "write_status": audit_slot.get("write_status"),
         "read_validation_status": audit_slot.get("read_validation_status"),
         "write_validation_status": audit_slot.get("write_validation_status"),
+    }
+
+
+def _slot_metadata_snapshot(slot: tuple[int, int]) -> dict[str, Any]:
+    """Return metadata coverage for a slot without including the live value."""
+    meta = slot_meta(*slot)
+    component = component_meta(slot[0])
+    audit_slot = coverage_audit().get("slots", {}).get(f"{slot[0]}:{slot[1]}", {})
+    return {
+        "slot": list(slot),
+        "slot_key": f"{slot[0]}:{slot[1]}",
+        "metadata_present": meta is not None,
+        "coverage_audit_present": bool(audit_slot),
+        "label": meta.label if meta else audit_slot.get("label"),
+        "unit": meta.unit if meta else audit_slot.get("unit"),
+        "datatype": meta.datatype if meta else audit_slot.get("datatype"),
+        "mode": meta.mode if meta else audit_slot.get("mode"),
+        "wire_mode": meta.wire_mode if meta else audit_slot.get("wire_mode"),
+        "control_platform": (
+            meta.control_platform if meta else audit_slot.get("control_platform")
+        ),
+        "component_kind": component.kind if component else audit_slot.get("component_kind"),
+        "component_name": component.name if component else audit_slot.get("component_name"),
+        "support_class": audit_slot.get("support_class"),
+        "write_status": audit_slot.get("write_status"),
+        "read_validation_status": audit_slot.get("read_validation_status"),
+        "write_validation_status": audit_slot.get("write_validation_status"),
+    }
+
+
+def build_slot_debug_report(entry: ConfigEntry, coordinator: Any) -> dict[str, Any]:
+    """Return a value-free slot coverage report for debug investigations."""
+    historical_observed = coordinator.observed_slots
+    active_observed = coordinator.active_slots
+    stale_slots = coordinator.stale_slots
+    audit_slots = coverage_audit().get("slots", {})
+    canonical_claimed = canonical_claimed_slots(active_observed)
+
+    active_unknown_slots = sorted(
+        slot for slot in active_observed if slot_meta(*slot) is None
+    )
+    historical_unknown_slots = sorted(
+        slot for slot in historical_observed if slot_meta(*slot) is None
+    )
+    active_audit_missing_slots = sorted(
+        slot
+        for slot in active_observed
+        if f"{slot[0]}:{slot[1]}" not in audit_slots
+    )
+    historical_audit_missing_slots = sorted(
+        slot
+        for slot in historical_observed
+        if f"{slot[0]}:{slot[1]}" not in audit_slots
+    )
+    raw_fallback_slots = sorted(
+        slot for slot in active_observed if slot not in canonical_claimed
+    )
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "entry_title": entry.title,
+        "active_slot_definition": (
+            "recently updated by the active SignalR DataHub session"
+        ),
+        "active_slot_window_seconds": coordinator.active_slot_window_seconds,
+        "observed_slot_count": len(historical_observed),
+        "active_slot_count": len(active_observed),
+        "stale_slot_count": len(stale_slots),
+        "known_metadata_slot_count": len(all_slots()),
+        "known_component_count": len(all_components()),
+        "active_unknown_slot_count": len(active_unknown_slots),
+        "historical_unknown_slot_count": len(historical_unknown_slots),
+        "active_audit_missing_slot_count": len(active_audit_missing_slots),
+        "historical_audit_missing_slot_count": len(historical_audit_missing_slots),
+        "raw_fallback_slot_count": len(raw_fallback_slots),
+        "active_unknown_slots": [
+            _slot_metadata_snapshot(slot) for slot in active_unknown_slots
+        ],
+        "historical_unknown_slots": [
+            _slot_metadata_snapshot(slot) for slot in historical_unknown_slots
+        ],
+        "active_audit_missing_slots": [
+            _slot_metadata_snapshot(slot) for slot in active_audit_missing_slots
+        ],
+        "historical_audit_missing_slots": [
+            _slot_metadata_snapshot(slot) for slot in historical_audit_missing_slots
+        ],
+        "raw_fallback_slots": [
+            _slot_metadata_snapshot(slot) for slot in raw_fallback_slots
+        ],
+        "stale_slots": [
+            _slot_metadata_snapshot(slot) for slot in sorted(stale_slots)
+        ],
     }
 
 
