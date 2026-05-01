@@ -561,13 +561,15 @@ class DashboardGenerationTests(unittest.TestCase):
             init_mod._distance_unit_override_updates(
                 SimpleNamespace(unit="km"),
                 SimpleNamespace(unit_of_measurement="km"),
+                SimpleNamespace(options={"use_miles": True}),
             ),
-            {"unit_of_measurement": None},
+            {"unit_of_measurement": "mi"},
         )
         self.assertEqual(
             init_mod._distance_unit_override_updates(
                 SimpleNamespace(unit="km"),
                 SimpleNamespace(unit_of_measurement="mi"),
+                SimpleNamespace(options={}),
             ),
             {"unit_of_measurement": None},
         )
@@ -575,6 +577,7 @@ class DashboardGenerationTests(unittest.TestCase):
             init_mod._distance_unit_override_updates(
                 SimpleNamespace(unit="%"),
                 SimpleNamespace(unit_of_measurement="%"),
+                SimpleNamespace(options={"use_miles": True}),
             ),
             {},
         )

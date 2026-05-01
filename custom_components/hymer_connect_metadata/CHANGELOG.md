@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.11] - 2026-05-01
+
+### Fixed
+
+- **Miles display still rendered as kilometres** — distance slot sensors no
+  longer advertise Home Assistant's distance device class while the
+  integration-level miles option is enabled, preventing Home Assistant's
+  global unit system from converting the integration-managed mile value back to
+  kilometres
+- **Existing distance unit overrides** — the registry policy now actively sets
+  `mi` while the miles option is enabled and clears that override again when
+  the option is disabled
+
 ## [1.0.10] - 2026-04-30
 
 ### Fixed

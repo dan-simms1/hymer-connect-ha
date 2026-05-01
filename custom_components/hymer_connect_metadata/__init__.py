@@ -67,7 +67,7 @@ from .entity_base import (
     slot_entity_hidden_by_default,
     slot_entity_name_override,
 )
-from .preferences import admin_actions_enabled
+from .preferences import admin_actions_enabled, use_miles
 from .runtime_metadata import RuntimeMetadataMissingError, ensure_runtime_metadata_present
 from .template_specs import (
     invalidate_template_spec_cache,
@@ -684,13 +684,18 @@ def _legacy_unique_id_should_remove(
     return unique_id.startswith(f"{entry_id}_fridge_mode_b")
 
 
-def _distance_unit_override_updates(meta: Any, entity_entry: Any) -> dict[str, None]:
-    """Clear stale distance unit overrides so entry display preferences apply."""
-    if (
-        getattr(meta, "unit", None) == "km"
-        and getattr(entity_entry, "unit_of_measurement", None) in {"km", "mi"}
-    ):
-        return {"unit_of_measurement": None}
+def _distance_unit_override_updates(
+    meta: Any,
+    entity_entry: Any,
+    entry: HymerConnectConfigEntry,
+) -> dict[str, str | None]:
+    """Keep distance unit overrides aligned with entry display preferences."""
+    if getattr(meta, "unit", None) != "km":
+        return {}
+    current = getattr(entity_entry, "unit_of_measurement", None)
+    desired = "mi" if use_miles(entry) else None
+    if current != desired and current in {"km", "mi", None}:
+        return {"unit_of_measurement": desired}
     return {}
 
 
@@ -722,7 +727,7 @@ async def _async_apply_generic_slot_entity_policy(
                 updates["name"] = name_override
         if entity_entry.entity_category != category:
             updates["entity_category"] = category
-        updates.update(_distance_unit_override_updates(meta, entity_entry))
+        updates.update(_distance_unit_override_updates(meta, entity_entry, entry))
         integration_disabled = entity_entry.disabled_by == er.RegistryEntryDisabler.INTEGRATION
         should_disable = slot_entity_disabled_by_default(meta, entry)
         if should_disable:
