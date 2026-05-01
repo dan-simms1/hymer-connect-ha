@@ -1679,6 +1679,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
         runtime_metadata = importlib.import_module(
             "custom_components.hymer_connect_metadata.runtime_metadata"
         )
+        runtime_metadata.invalidate_oauth_client_cache()
 
         header = runtime_metadata.load_oauth_basic_auth_header()
 
@@ -1686,6 +1687,35 @@ class GeneratorAndEntityTests(unittest.TestCase):
             header,
             "Basic dGVzdC1jbGllbnQ6c3ludGhldGljLXNlY3JldA==",
         )
+
+    def test_runtime_metadata_caches_oauth_header_until_invalidated(self) -> None:
+        ensure_package_paths()
+        runtime_metadata = importlib.import_module(
+            "custom_components.hymer_connect_metadata.runtime_metadata"
+        )
+
+        with TemporaryDirectory() as data_dir:
+            data_path = Path(data_dir)
+            oauth_path = data_path / "oauth_client.json"
+            oauth_path.write_text(
+                json.dumps({"authorization_header": "Basic first"})
+            )
+            with mock.patch.object(runtime_metadata, "DATA_DIR", data_path):
+                runtime_metadata.invalidate_oauth_client_cache()
+                runtime_metadata.warm_oauth_client_cache()
+                oauth_path.write_text(
+                    json.dumps({"authorization_header": "Basic second"})
+                )
+
+                self.assertEqual(
+                    runtime_metadata.load_oauth_basic_auth_header(),
+                    "Basic first",
+                )
+                runtime_metadata.invalidate_oauth_client_cache()
+                self.assertEqual(
+                    runtime_metadata.load_oauth_basic_auth_header(),
+                    "Basic second",
+                )
 
     def test_missing_runtime_metadata_repair_issue_uses_prepare_command(self) -> None:
         install_homeassistant_stubs()

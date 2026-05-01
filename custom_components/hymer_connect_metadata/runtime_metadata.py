@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 import json
 from pathlib import Path
 
@@ -65,6 +66,7 @@ def default_prepare_command() -> str:
     return "python3 scripts/prepare_runtime_metadata.py --apk-url <apk-url> --zip-out hymer_connect_metadata_runtime_metadata.zip"
 
 
+@lru_cache(maxsize=1)
 def load_oauth_basic_auth_header() -> str:
     """Return the locally generated OAuth client Basic auth header."""
     file_path = data_path(OAUTH_CLIENT_FILENAME)
@@ -84,6 +86,16 @@ def load_oauth_basic_auth_header() -> str:
             default_prepare_command(),
         )
     return header
+
+
+def invalidate_oauth_client_cache() -> None:
+    """Clear cached OAuth client metadata so reloads see local JSON updates."""
+    load_oauth_basic_auth_header.cache_clear()
+
+
+def warm_oauth_client_cache() -> None:
+    """Load OAuth client metadata into cache off the event loop."""
+    load_oauth_basic_auth_header()
 
 
 def missing_runtime_data_files() -> tuple[str, ...]:

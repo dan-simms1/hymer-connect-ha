@@ -68,7 +68,12 @@ from .entity_base import (
     slot_entity_name_override,
 )
 from .preferences import admin_actions_enabled, use_miles
-from .runtime_metadata import RuntimeMetadataMissingError, ensure_runtime_metadata_present
+from .runtime_metadata import (
+    RuntimeMetadataMissingError,
+    ensure_runtime_metadata_present,
+    invalidate_oauth_client_cache,
+    warm_oauth_client_cache,
+)
 from .template_specs import (
     invalidate_template_spec_cache,
     rich_template_claims,
@@ -995,12 +1000,14 @@ async def async_setup_entry(
     async_delete_missing_runtime_metadata_issue(hass)
 
     invalidate_runtime_metadata_cache()
+    invalidate_oauth_client_cache()
     invalidate_capability_cache()
     invalidate_template_spec_cache()
     invalidate_catalog_cache()
 
     try:
         await hass.async_add_executor_job(warm_runtime_metadata_cache)
+        await hass.async_add_executor_job(warm_oauth_client_cache)
         await hass.async_add_executor_job(warm_capability_cache)
         await hass.async_add_executor_job(warm_template_spec_cache)
         await hass.async_add_executor_job(warm_catalog_cache)

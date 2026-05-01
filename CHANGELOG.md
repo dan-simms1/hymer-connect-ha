@@ -6,5 +6,5 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `1.0.11` — prevents Home Assistant's global distance-unit conversion from
-  converting integration-managed mile displays back to kilometres
+- `1.0.12` — preloads the local OAuth client metadata off the event loop so
+  token refresh no longer performs blocking file I/O
