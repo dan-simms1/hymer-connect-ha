@@ -551,6 +551,34 @@ class DashboardGenerationTests(unittest.TestCase):
             "grand-canyon-s-700",
         )
 
+    def test_distance_unit_registry_override_is_cleared(self) -> None:
+        install_homeassistant_stubs()
+        init_mod = importlib.import_module(
+            "custom_components.hymer_connect_metadata.__init__"
+        )
+
+        self.assertEqual(
+            init_mod._distance_unit_override_updates(
+                SimpleNamespace(unit="km"),
+                SimpleNamespace(unit_of_measurement="km"),
+            ),
+            {"unit_of_measurement": None},
+        )
+        self.assertEqual(
+            init_mod._distance_unit_override_updates(
+                SimpleNamespace(unit="km"),
+                SimpleNamespace(unit_of_measurement="mi"),
+            ),
+            {"unit_of_measurement": None},
+        )
+        self.assertEqual(
+            init_mod._distance_unit_override_updates(
+                SimpleNamespace(unit="%"),
+                SimpleNamespace(unit_of_measurement="%"),
+            ),
+            {},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
