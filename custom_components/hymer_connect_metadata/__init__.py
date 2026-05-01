@@ -684,6 +684,16 @@ def _legacy_unique_id_should_remove(
     return unique_id.startswith(f"{entry_id}_fridge_mode_b")
 
 
+def _distance_unit_override_updates(meta: Any, entity_entry: Any) -> dict[str, None]:
+    """Clear stale distance unit overrides so entry display preferences apply."""
+    if (
+        getattr(meta, "unit", None) == "km"
+        and getattr(entity_entry, "unit_of_measurement", None) in {"km", "mi"}
+    ):
+        return {"unit_of_measurement": None}
+    return {}
+
+
 async def _async_apply_generic_slot_entity_policy(
     hass: HomeAssistant,
     entry: HymerConnectConfigEntry,
@@ -712,6 +722,7 @@ async def _async_apply_generic_slot_entity_policy(
                 updates["name"] = name_override
         if entity_entry.entity_category != category:
             updates["entity_category"] = category
+        updates.update(_distance_unit_override_updates(meta, entity_entry))
         integration_disabled = entity_entry.disabled_by == er.RegistryEntryDisabler.INTEGRATION
         should_disable = slot_entity_disabled_by_default(meta, entry)
         if should_disable:
