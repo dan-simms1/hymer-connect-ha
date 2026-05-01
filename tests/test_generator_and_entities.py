@@ -271,6 +271,14 @@ class GeneratorAndEntityTests(unittest.TestCase):
             options=MappingProxyType({"use_miles": True})
         )
         self.assertEqual(preferences.display_unit("km", mapping_entry), "mi")
+        distance_meta = SimpleNamespace(unit="km", label="odometer")
+        self.assertIsNone(
+            entity_base._default_device_class(distance_meta, mapping_entry)
+        )
+        self.assertEqual(
+            entity_base._default_device_class(distance_meta, SimpleNamespace(options={})),
+            entity_base.SensorDeviceClass.DISTANCE,
+        )
         self.assertAlmostEqual(
             preferences.display_value(10.0, "km", mapping_entry),
             6.21371192237334,

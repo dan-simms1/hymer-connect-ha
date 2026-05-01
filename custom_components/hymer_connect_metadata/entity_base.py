@@ -45,6 +45,7 @@ from .preferences import (
     display_unit,
     display_value,
     native_value_from_display,
+    use_miles,
 )
 from .slot_actions import SlotActionError, serialize_slot_action
 
@@ -151,10 +152,12 @@ def _label_words(label: str) -> set[str]:
     return {word for word in label.split("_") if word}
 
 
-def _default_device_class(meta: SlotMeta) -> SensorDeviceClass | None:
+def _default_device_class(meta: SlotMeta, entry: Any | None = None) -> SensorDeviceClass | None:
     # battery_soc, bms_state_of_health etc. — use BATTERY
     if meta.unit == "%" and "soc" in meta.label:
         return SensorDeviceClass.BATTERY
+    if meta.unit == "km" and entry is not None and use_miles(entry):
+        return None
     return _UNIT_TO_DEVICE_CLASS.get(meta.unit)
 
 
@@ -463,7 +466,7 @@ class HymerSensor(_HymerSlotEntity, SensorEntity):
         super().__init__(coordinator, entry, meta, component)
         if meta.unit:
             self._attr_native_unit_of_measurement = display_unit(meta.unit, entry)
-        dc = _default_device_class(meta)
+        dc = _default_device_class(meta, entry)
         if dc is not None:
             self._attr_device_class = dc
         if meta.datatype in ("int", "float") and meta.unit:

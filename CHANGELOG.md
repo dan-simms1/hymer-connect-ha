@@ -6,6 +6,5 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `1.0.10` — clears stale Home Assistant entity-registry distance-unit
-  overrides so the miles display option can take effect on existing distance
-  entities
+- `1.0.11` — prevents Home Assistant's global distance-unit conversion from
+  converting integration-managed mile displays back to kilometres
