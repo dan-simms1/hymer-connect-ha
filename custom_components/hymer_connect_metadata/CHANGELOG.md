@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.13] - 2026-05-01
+
+### Added
+
+- **Value-free slot debug export** — adds the
+  `hymer_connect_metadata.export_slot_debug_report` service for opt-in
+  capability investigations. When the per-entry debug diagnostics option is
+  enabled, the service writes a local JSON report containing observed slot IDs,
+  metadata coverage status, unknown/audit-missing slots, raw fallback slots,
+  and stale slot IDs without exporting live slot values.
+
+### Changed
+
+- **Debug report documentation** — README now documents where the local slot
+  debug report is written and clarifies that it intentionally excludes returned
+  slot values.
+
 ## [1.0.12] - 2026-05-01
 
 ### Fixed

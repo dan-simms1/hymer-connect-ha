@@ -6,5 +6,5 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `1.0.12` — preloads the local OAuth client metadata off the event loop so
-  token refresh no longer performs blocking file I/O
+- `1.0.13` — adds an opt-in value-free slot debug export service for checking
+  which live SCU slots are missing from the local metadata pack

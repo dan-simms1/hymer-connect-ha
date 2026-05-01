@@ -26,3 +26,20 @@ generate_dashboard:
       example: "grand-canyon-s-700"
       selector:
         text:
+
+export_slot_debug_report:
+  name: Export Slot Debug Report
+  description: Export a local JSON report of observed slot IDs and metadata coverage. Requires the entry option "Show debug diagnostics" and never includes live slot values.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Config entry ID to export. Required when multiple HYMER entries are loaded.
+      example: "9c1f8d31b8c74d2ea8ab1234567890ab"
+      selector:
+        text:
+    filename:
+      name: Filename
+      description: Optional filename stem for the JSON report. Defaults to "<vehicle title>-slot-debug".
+      example: "grand-canyon-s-700-slot-debug"
+      selector:
+        text:
