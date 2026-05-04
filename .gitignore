@@ -47,5 +47,6 @@ pairing-session*.json
 remote-access-refresh-token.txt
 captured_ehg_token.txt
 test_signalr.py
+docs/backlog.md
 docs/release-plan.md
 custom_components/decode_cmds.py

@@ -42,6 +42,8 @@ MSG_TYPE_COMPLETION = 3
 MSG_TYPE_PING = 6
 
 PIA_REQUEST_TIMEOUT = 30.0
+STANDBY_WAKE_UPDATE_TOKENS_DELAY = 3.0
+STANDBY_WAKE_RESUBSCRIBE_DELAY = 0.75
 
 
 def _is_closed_transport_error(err: RuntimeError) -> bool:
@@ -101,6 +103,7 @@ class HymerSignalRClient:
         self._pending_requests: dict[int, _PendingPiaRequest] = {}
         self._waiting_request_ids: list[int] = []
         self._token_refresh_task: asyncio.Task | None = None
+        self._standby_wake_refresh_task: asyncio.Task | None = None
         self._known_slots = frozenset(known_slots or ())
 
     @property
@@ -125,18 +128,12 @@ class HymerSignalRClient:
         sensor_id: int,
         value: Any,
     ) -> None:
-        """Keep local main-switch state in sync with a successful command send.
-
-        This is intentionally local to the client. It updates the connection
-        health model without faking a coordinator push, so command entities can
-        keep their own optimistic/holdoff behavior until the SCU readback lands.
-        """
+        """Log a main-switch command ack without mutating transport state."""
         slot = (bus_id, sensor_id)
         if slot not in _main_switch_slots():
             return
-        self._slot_data[slot] = value
         _LOGGER.debug(
-            "Optimistically updated main switch state to %s on %s",
+            "Main switch command accepted for %s on %s; waiting for SCU readback",
             value,
             slot,
         )
@@ -183,6 +180,52 @@ class HymerSignalRClient:
                 self._vehicle_urn,
                 exc_info=exc,
             )
+
+    def _clear_standby_wake_refresh_task(self, task: asyncio.Task) -> None:
+        """Drop the post-wake refresh task reference once it finishes."""
+        if self._standby_wake_refresh_task is task:
+            self._standby_wake_refresh_task = None
+
+    def _schedule_standby_wake_refresh(self) -> None:
+        """Refresh hub auth and subscriptions after the SCU wakes from standby."""
+        if (
+            self._standby_wake_refresh_task is not None
+            and not self._standby_wake_refresh_task.done()
+        ):
+            _LOGGER.debug(
+                "Post-standby SignalR refresh already scheduled for %s",
+                self._vehicle_urn,
+            )
+            return
+        task = asyncio.create_task(self._run_standby_wake_refresh())
+        task.add_done_callback(self._clear_standby_wake_refresh_task)
+        self._standby_wake_refresh_task = task
+
+    async def _run_standby_wake_refresh(self) -> None:
+        """Re-authenticate and resubscribe after the SCU reports a 12V wake."""
+        try:
+            _LOGGER.info(
+                "SCU wake detected for %s — refreshing SignalR tokens and subscriptions",
+                self._vehicle_urn,
+            )
+            await asyncio.sleep(STANDBY_WAKE_UPDATE_TOKENS_DELAY)
+            if not self.connected:
+                return
+            if not await self._send_update_tokens(wait_response=True):
+                raise HymerConnectApiError("Post-standby UpdateTokens failed")
+            await asyncio.sleep(STANDBY_WAKE_RESUBSCRIBE_DELAY)
+            if self.connected:
+                await self._send_initial_subscriptions()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _LOGGER.warning(
+                "Post-standby SignalR refresh failed for %s",
+                self._vehicle_urn,
+                exc_info=True,
+            )
+            self._connected = False
+            self._notify_connection_lost()
 
     async def connect(self) -> None:
         """Establish the SignalR WebSocket connection."""
@@ -514,13 +557,17 @@ class HymerSignalRClient:
                 )
 
             if slot_data:
+                was_standby = self._is_vehicle_standby()
                 self._slot_data.update(slot_data)
+                is_standby = self._is_vehicle_standby()
                 self._last_data_received = time.monotonic()
                 _LOGGER.debug(
                     "PiaResponse: %d slots updated, keys=%s",
                     len(slot_data),
                     list(slot_data.keys())[:20],
                 )
+                if was_standby and not is_standby:
+                    self._schedule_standby_wake_refresh()
                 if self._on_sensor_update:
                     self._on_sensor_update(slot_data)
 
@@ -609,6 +656,14 @@ class HymerSignalRClient:
                     pass
                 finally:
                     self._token_refresh_task = None
+            if self._standby_wake_refresh_task is not None:
+                self._standby_wake_refresh_task.cancel()
+                try:
+                    await self._standby_wake_refresh_task
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    self._standby_wake_refresh_task = None
             err = HymerConnectApiError("SignalR connection closed")
             for future in self._completion_futures.values():
                 if not future.done():
@@ -798,6 +853,13 @@ class HymerSignalRClient:
             except asyncio.CancelledError:
                 pass
         self._token_refresh_task = None
+        if self._standby_wake_refresh_task and not self._standby_wake_refresh_task.done():
+            self._standby_wake_refresh_task.cancel()
+            try:
+                await self._standby_wake_refresh_task
+            except asyncio.CancelledError:
+                pass
+        self._standby_wake_refresh_task = None
         if self._ws and not self._ws.closed:
             await self._ws.close()
         if self._task and not self._task.done():

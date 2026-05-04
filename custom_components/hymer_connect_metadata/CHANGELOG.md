@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Post-standby DataHub refresh** — when the SCU reports the 12 V main switch
+  waking from standby, the SignalR client now waits for the SCU to settle,
+  refreshes `UpdateTokens`, and resubscribes to the app-style PIA subscription
+  burst. Main-switch command acknowledgements no longer fake the transport
+  cache before the SCU readback arrives.
+- **BLE token-tool transport compatibility** — the early-alpha token tool now
+  enables the SCU's legacy TLS 1.0/1.1 cipher profile with OpenSSL security
+  level lowered for that local session, prefers write-without-response for the
+  UART RX data characteristic, and paces BLE chunks to avoid overrunning the
+  SCU.
+- **Dashboard distance display polish** — generated dashboards now request
+  one-decimal display precision for kilometre-backed distance entities and use
+  clearer chassis-card labels/icons for odometer, service distance, fuel,
+  AdBlue range, outside temperature, and washer-fluid rows.
+
 ## [1.0.13] - 2026-05-01
 
 ### Added

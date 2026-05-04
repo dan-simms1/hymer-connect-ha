@@ -13,6 +13,20 @@ INTEGRATION_DIR = CUSTOM_COMPONENTS_DIR / "hymer_connect_metadata"
 
 def ensure_package_paths() -> None:
     """Register package shells without importing the integration __init__."""
+    if "aiohttp" not in sys.modules:
+        try:
+            __import__("aiohttp")
+        except ModuleNotFoundError:
+            aiohttp = types.ModuleType("aiohttp")
+            aiohttp.ClientError = type("ClientError", (Exception,), {})
+            aiohttp.ClientSession = type("ClientSession", (), {})
+            aiohttp.ClientWebSocketResponse = type("ClientWebSocketResponse", (), {})
+            aiohttp.WSMsgType = types.SimpleNamespace(
+                TEXT="text",
+                CLOSED="closed",
+                ERROR="error",
+            )
+            sys.modules["aiohttp"] = aiohttp
     if "custom_components" not in sys.modules:
         custom_components = types.ModuleType("custom_components")
         custom_components.__path__ = [str(CUSTOM_COMPONENTS_DIR)]

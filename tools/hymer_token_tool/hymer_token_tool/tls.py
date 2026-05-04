@@ -12,7 +12,7 @@ import tempfile
 import threading
 from typing import Any
 
-APP_TLS_CIPHERS = "AES128-SHA:AES256-SHA"
+APP_TLS_CIPHERS = "@SECLEVEL=0:AES128-SHA:AES256-SHA"
 APP_TLS_MINIMUM_VERSION = ssl.TLSVersion.TLSv1
 APP_TLS_MAXIMUM_VERSION = ssl.TLSVersion.TLSv1_1
 _TLS_READ_CHUNK_SIZE = 16_384
@@ -79,6 +79,7 @@ def create_legacy_tls_context(
         context.verify_mode = ssl.CERT_NONE
         context.minimum_version = minimum_version
         context.maximum_version = maximum_version
+        _clear_legacy_tls_disable_options(context)
         context.set_ciphers(ciphers)
         return context
     except ssl.SSLError as err:
@@ -86,6 +87,14 @@ def create_legacy_tls_context(
             f"Could not build legacy TLS context for {minimum_version.name}.."
             f"{maximum_version.name} with ciphers {ciphers!r}: {err}"
         ) from err
+
+
+def _clear_legacy_tls_disable_options(context: ssl.SSLContext) -> None:
+    """Allow TLS 1.0/1.1 when OpenSSL exposes legacy protocol-disable flags."""
+    for option_name in ("OP_NO_TLSv1", "OP_NO_TLSv1_1"):
+        option = getattr(ssl, option_name, None)
+        if isinstance(option, int):
+            context.options &= ~option
 
 
 class LegacyTlsClient:

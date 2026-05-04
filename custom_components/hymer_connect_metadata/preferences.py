@@ -65,6 +65,13 @@ def display_unit(native_unit: str | None, entry: Any) -> str | None:
     return native_unit
 
 
+def suggested_display_precision(native_unit: str | None) -> int | None:
+    """Return a frontend display precision for converted native units."""
+    if native_unit == "km":
+        return 1
+    return None
+
+
 def display_value(value: Any, native_unit: str | None, entry: Any) -> Any:
     """Convert a native value to the preferred display unit."""
     if not isinstance(value, (int, float)):
