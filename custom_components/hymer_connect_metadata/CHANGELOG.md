@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.14] - 2026-05-04
+
+### Added
+
+- **Optional Hermes bytecode decompile step** — `scripts/prepare_runtime_metadata.py`
+  now accepts `--hbc-decompiler /path/to/hbc-decompiler` so users can generate
+  the local metadata pack directly from a Hermes-based APK without separately
+  preparing `bundle.js`. The documented workflow was validated with
+  `hermes-dec` 0.1.3 and remains local-only; no decompiled bundle or generated
+  metadata is shipped in the repository.
+
 ### Fixed
 
 - **Post-standby DataHub refresh** — when the SCU reports the 12 V main switch

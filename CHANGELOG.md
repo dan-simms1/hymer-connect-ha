@@ -6,5 +6,7 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `1.0.13` — adds an opt-in value-free slot debug export service for checking
-  which live SCU slots are missing from the local metadata pack
+- `1.0.14` — adds optional local Hermes bytecode decompilation for runtime
+  metadata preparation, improves post-standby DataHub refresh handling, polishes
+  generated dashboard distance display, and updates the early-alpha BLE token
+  tool transport compatibility

@@ -153,17 +153,34 @@ python3 scripts/prepare_runtime_metadata.py \
   --ha-config-dir /path/to/home-assistant-config
 ```
 
-If the APK contains a **Hermes bytecode** bundle, the script will extract the
-bytecode asset and stop with instructions to provide an expanded `bundle.js`:
+If the APK contains a **Hermes bytecode** bundle, provide a local
+`hbc-decompiler` command and the script will decompile the bytecode into a
+pseudo-JS bundle inside the work directory before extracting metadata. This
+project does not vendor or depend on that tool; this workflow was validated
+with `hermes-dec` 0.1.3:
+
+```bash
+python3 -m venv /tmp/hymer-hermes-tools
+/tmp/hymer-hermes-tools/bin/python -m pip install "hermes-dec==0.1.3"
+```
 
 ```bash
 python3 scripts/prepare_runtime_metadata.py \
   --apk-path /path/to/com.ehg.hymerconnect.apk \
-  --bundle-js /path/to/bundle.js \
+  --hbc-decompiler /tmp/hymer-hermes-tools/bin/hbc-decompiler \
   --zip-out hymer_connect_metadata_runtime_metadata.zip
 ```
 
-or:
+If you already produced a pseudo-JS bundle yourself, you can still pass it
+directly:
+
+```bash
+python3 scripts/prepare_runtime_metadata.py \
+  --bundle-js /path/to/bundle.js \
+  --ha-config-dir /path/to/home-assistant-config
+```
+
+or host that local pseudo-JS bundle somewhere private and temporary:
 
 ```bash
 python3 scripts/prepare_runtime_metadata.py \
