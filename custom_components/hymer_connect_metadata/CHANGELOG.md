@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.16] - 2026-05-04
+
+### Fixed
+
+- **Preserve local runtime metadata during HACS updates** — adds the HACS
+  `persistent_directory` setting for `data/` so locally generated metadata and
+  OAuth client material are backed up and restored when HACS replaces the
+  integration folder.
+- **Repairs helper module auto-load** — renames the internal Repair issue helper
+  module so Home Assistant no longer treats it as an invalid Repairs platform at
+  startup.
+- **Campervan brand asset** — updates the integration icon/logo vehicle
+  silhouette to read as a campervan rather than a car.
+
 ## [1.0.15] - 2026-05-04
 
 ### Added
