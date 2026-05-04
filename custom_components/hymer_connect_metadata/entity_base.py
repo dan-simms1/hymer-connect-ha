@@ -45,6 +45,7 @@ from .preferences import (
     display_unit,
     display_value,
     native_value_from_display,
+    suggested_display_precision,
     use_miles,
 )
 from .slot_actions import SlotActionError, serialize_slot_action
@@ -466,6 +467,9 @@ class HymerSensor(_HymerSlotEntity, SensorEntity):
         super().__init__(coordinator, entry, meta, component)
         if meta.unit:
             self._attr_native_unit_of_measurement = display_unit(meta.unit, entry)
+            precision = suggested_display_precision(meta.unit)
+            if precision is not None:
+                self._attr_suggested_display_precision = precision
         dc = _default_device_class(meta, entry)
         if dc is not None:
             self._attr_device_class = dc

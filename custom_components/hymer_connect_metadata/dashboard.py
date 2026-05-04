@@ -293,6 +293,11 @@ VOLTAGE_GAUGE_SEVERITY: dict[str, float] = {
 }
 
 DASHBOARD_NAME_OVERRIDES: dict[str, str] = {
+    "odometer": "Odometer",
+    "mileage": "Odometer",
+    "distance_to_service": "Service Due In",
+    "adblue_remaining_distance": "AdBlue Range",
+    "wiping_water": "Washer Fluid",
     "battery_soc": "Battery SOC",
     "battery_state_of_health": "Battery SoH",
     "fresh_water_level": "Fresh Water",
@@ -320,6 +325,16 @@ DASHBOARD_NAME_OVERRIDES: dict[str, str] = {
     "shoreline_connected": "230 V Connection",
     "main_switch": "12 V Switch",
     "water_pump": "Water Pump",
+}
+
+DASHBOARD_ICON_OVERRIDES: dict[str, str] = {
+    "odometer": "mdi:counter",
+    "mileage": "mdi:counter",
+    "distance_to_service": "mdi:car-wrench",
+    "fuel_level": "mdi:gas-station",
+    "adblue_remaining_distance": "mdi:car-cog",
+    "outside_temperature": "mdi:thermometer",
+    "wiping_water": "mdi:wiper-wash",
 }
 
 
@@ -652,10 +667,13 @@ def _display_name(item: DashboardEntity, dashboard_title: str) -> str:
 
 
 def _entity_ref(item: DashboardEntity, dashboard_title: str) -> dict[str, str]:
-    return {
+    row = {
         "entity": item.entity_id,
         "name": _display_name(item, dashboard_title),
     }
+    if item.source_key in DASHBOARD_ICON_OVERRIDES:
+        row["icon"] = DASHBOARD_ICON_OVERRIDES[item.source_key]
+    return row
 
 
 def _light_card(item: DashboardEntity, dashboard_title: str) -> dict[str, Any]:

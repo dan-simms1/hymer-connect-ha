@@ -271,6 +271,8 @@ class GeneratorAndEntityTests(unittest.TestCase):
             options=MappingProxyType({"use_miles": True})
         )
         self.assertEqual(preferences.display_unit("km", mapping_entry), "mi")
+        self.assertEqual(preferences.suggested_display_precision("km"), 1)
+        self.assertIsNone(preferences.suggested_display_precision("%"))
         distance_meta = SimpleNamespace(unit="km", label="odometer")
         self.assertIsNone(
             entity_base._default_device_class(distance_meta, mapping_entry)
@@ -283,6 +285,31 @@ class GeneratorAndEntityTests(unittest.TestCase):
             preferences.display_value(10.0, "km", mapping_entry),
             6.21371192237334,
         )
+        discovery = importlib.import_module(
+            "custom_components.hymer_connect_metadata.discovery"
+        )
+        distance_sensor = entity_base.HymerSensor(
+            SimpleNamespace(data={"signalr_slots": {(1, 1): 1875.4}}),
+            SimpleNamespace(
+                entry_id="entry-1",
+                data={},
+                options={"use_miles": True},
+                title="Test Van",
+            ),
+            discovery.SlotMeta(
+                bus_id=1,
+                sensor_id=1,
+                label="odometer",
+                unit="km",
+                datatype="float",
+                mode="r",
+                wire_mode="r",
+            ),
+            None,
+        )
+        self.assertEqual(distance_sensor._attr_native_unit_of_measurement, "mi")
+        self.assertEqual(distance_sensor._attr_suggested_display_precision, 1)
+        self.assertAlmostEqual(distance_sensor.native_value, 1165.3195339218962)
         self.assertAlmostEqual(
             preferences.native_value_from_display(
                 68.0,
@@ -904,6 +931,85 @@ class GeneratorAndEntityTests(unittest.TestCase):
             self.assertEqual(client._waiting_request_ids, [])
 
         asyncio.run(run_test())
+
+    def test_main_switch_readback_schedules_post_standby_refresh(self) -> None:
+        ensure_package_paths()
+        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
+        pia_decoder = importlib.import_module("custom_components.hymer_connect_metadata.pia_decoder")
+        cls = signalr_mod.HymerSignalRClient
+
+        import asyncio
+
+        original_main_switch_slots = signalr_mod.main_switch_slots
+        signalr_mod.main_switch_slots = lambda: frozenset({(3, 1)})
+        try:
+            sensor = (
+                pia_decoder._encode_varint_field(1, 1)
+                + pia_decoder._encode_varint_field(2, 3)
+                + pia_decoder._encode_str_field(4, "On")
+            )
+            response_payload = base64.b64encode(
+                pia_decoder._encode_varint_field(1, 12345)
+                + pia_decoder._encode_varint_field(2, pia_decoder.STATUS_SUCCESS)
+                + pia_decoder._encode_varint_field(3, 1765109862)
+                + pia_decoder._encode_bytes_field(
+                    5,
+                    pia_decoder._encode_bytes_field(1, sensor),
+                )
+            ).decode("ascii")
+
+            async def run_test() -> None:
+                client = cls(
+                    api=object(),
+                    session=object(),
+                    vehicle_urn="vehicle",
+                    scu_urn="scu",
+                    known_slots={(3, 1)},
+                )
+                client._slot_data[(3, 1)] = "Off"
+                scheduled: list[str] = []
+
+                async def fake_wake_refresh() -> None:
+                    scheduled.append("refresh")
+
+                client._run_standby_wake_refresh = fake_wake_refresh
+                client._handle_message(
+                    {
+                        "type": signalr_mod.MSG_TYPE_INVOCATION,
+                        "target": "PiaResponse",
+                        "arguments": [response_payload],
+                    }
+                )
+                await asyncio.sleep(0)
+
+                self.assertEqual(client._slot_data[(3, 1)], "On")
+                self.assertEqual(scheduled, ["refresh"])
+
+            asyncio.run(run_test())
+        finally:
+            signalr_mod.main_switch_slots = original_main_switch_slots
+
+    def test_main_switch_command_ack_does_not_fake_standby_state(self) -> None:
+        ensure_package_paths()
+        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
+        cls = signalr_mod.HymerSignalRClient
+
+        original_main_switch_slots = signalr_mod.main_switch_slots
+        signalr_mod.main_switch_slots = lambda: frozenset({(3, 1)})
+        try:
+            client = cls(
+                api=object(),
+                session=object(),
+                vehicle_urn="vehicle",
+                scu_urn="scu",
+            )
+            client._slot_data[(3, 1)] = "Off"
+            client._apply_optimistic_main_switch_state(3, 1, "On")
+
+            self.assertEqual(client._slot_data[(3, 1)], "Off")
+            self.assertTrue(client._is_vehicle_standby())
+        finally:
+            signalr_mod.main_switch_slots = original_main_switch_slots
 
     def test_generated_subscription_requests_are_transport_decodable(self) -> None:
         ensure_package_paths()

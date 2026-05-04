@@ -36,6 +36,7 @@ DEFAULT_GATT_MTU = 23
 DEFAULT_CONNECT_TIMEOUT = 10.0
 DEFAULT_TLS_TIMEOUT = 20.0
 DEFAULT_WAKE_DELAY = 2.0
+SCU_UART_WRITE_PACING_S = 0.005
 
 
 class ScuBleSessionError(RuntimeError):
@@ -270,6 +271,7 @@ class ScuBleSession:
                 properties=rx_properties,
                 identifier=self.identifier,
                 description="UART RX characteristic",
+                prefer_without_response=True,
             )
             self._write_chunk_size = _choose_write_chunk_size(
                 mtu_size=self._mtu_size,
@@ -523,6 +525,8 @@ class ScuBleSession:
                 chunk,
                 response=self._write_with_response,
             )
+            if offset + self._write_chunk_size < len(data):
+                await asyncio.sleep(SCU_UART_WRITE_PACING_S)
 
     async def _next_uart_packet(self, deadline: float | None) -> bytes:
         if deadline is None:
@@ -615,9 +619,12 @@ def _choose_write_mode(
     properties: set[str],
     identifier: str,
     description: str,
+    prefer_without_response: bool = False,
 ) -> bool:
-    # The decompiled Android manager uses PROPERTY_WRITE when it is available
-    # (setWriteType(2)) and falls back to write-without-response otherwise.
+    if prefer_without_response and "write-without-response" in properties:
+        return False
+    # Control characteristics keep the decompiled Android manager preference:
+    # PROPERTY_WRITE when available, with write-without-response as fallback.
     if "write" in properties:
         return True
     if "write-without-response" in properties:

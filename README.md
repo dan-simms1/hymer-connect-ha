@@ -310,6 +310,10 @@ The token tool now reads the same locally generated `oauth_client.json` file as
 the integration, so you should run the metadata-preparation step at least once
 from the same repository checkout before using the tool.
 
+For the experimental BLE/TLS path, the tool handles the SCU's legacy TLS
+profile internally. It enables TLS 1.0/1.1 with the older AES-SHA cipher suites
+for that local session and does not require global OpenSSL or HAOS changes.
+
 It also includes a local helper for extracting an EHG remote-access refresh token
 from text you already captured yourself:
 

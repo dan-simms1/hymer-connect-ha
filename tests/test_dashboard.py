@@ -122,9 +122,21 @@ class DashboardGenerationTests(unittest.TestCase):
             ),
             self.dashboard.describe_dashboard_entity(
                 "entry-1",
+                entity_id="sensor.distance_to_service",
+                unique_id="entry-1_b1_s5",
+                name="Distance to Service",
+            ),
+            self.dashboard.describe_dashboard_entity(
+                "entry-1",
                 entity_id="sensor.fuel_level",
                 unique_id="entry-1_b1_s2",
                 name="Fuel Level",
+            ),
+            self.dashboard.describe_dashboard_entity(
+                "entry-1",
+                entity_id="sensor.adblue_remaining_distance",
+                unique_id="entry-1_b1_s7",
+                name="AdBlue Remaining Distance",
             ),
             self.dashboard.describe_dashboard_entity(
                 "entry-1",
@@ -376,6 +388,44 @@ class DashboardGenerationTests(unittest.TestCase):
             and card.get("title") == "Location"
         ]
         self.assertEqual(info_maps[0]["entities"], ["device_tracker.test_van"])
+        chassis_entities = next(
+            card["entities"]
+            for card in walk_cards(info_view["cards"])
+            if card.get("type") == "entities"
+            and card.get("title") == "Chassis Information"
+        )
+        self.assertIn(
+            {
+                "entity": "sensor.odometer",
+                "name": "Odometer",
+                "icon": "mdi:counter",
+            },
+            chassis_entities,
+        )
+        self.assertIn(
+            {
+                "entity": "sensor.distance_to_service",
+                "name": "Service Due In",
+                "icon": "mdi:car-wrench",
+            },
+            chassis_entities,
+        )
+        self.assertIn(
+            {
+                "entity": "sensor.fuel_level",
+                "name": "Fuel",
+                "icon": "mdi:gas-station",
+            },
+            chassis_entities,
+        )
+        self.assertIn(
+            {
+                "entity": "sensor.adblue_remaining_distance",
+                "name": "AdBlue Range",
+                "icon": "mdi:car-cog",
+            },
+            chassis_entities,
+        )
 
         light_view = next(view for view in config["views"] if view["title"] == "Light")
         light_titles = [

@@ -153,6 +153,11 @@ Check for:
 - negotiated TLS version and cipher
 - no timeout
 
+The tool configures the local SCU TLS session for the legacy profile observed
+on current SCU firmware: TLS 1.0/1.1 with AES128-SHA/AES256-SHA and OpenSSL
+security level lowered for this tool-managed context only. No system-wide
+OpenSSL or HAOS configuration change is required.
+
 ## Step 4: Send the Pairing Request
 
 Once the probe succeeds, attempt the SCU pairing request:
@@ -213,8 +218,11 @@ python3 -m hymer_token_tool scu-pair-mobile \
   backend. If the tool reports an unsupported bonding backend, complete OS pairing
   if prompted and retry.
 - `--wake-up` is still optional in theory, but it is useful while testing.
-- If `scu-tls-probe` times out, the next thing to inspect is the TLS handshake,
-  especially the session-id gap between the Android app and Python stdlib TLS.
+- The UART RX data characteristic is written with Write Without Response when
+  available and a short inter-chunk delay, matching the SCU behavior observed
+  during live pairing tests.
+- If `scu-tls-probe` times out, check that the SCU is awake, in range, bonded if
+  required, and accepting the legacy TLS handshake.
 > [!WARNING]
 > Treat `pairing-session.json` and any returned refresh token as secrets. A
 > third party who gets that token may be able to access vehicle data and

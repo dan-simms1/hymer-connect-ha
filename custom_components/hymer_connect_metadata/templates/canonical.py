@@ -29,7 +29,7 @@ from ..capability_resolver import (
     resolved_capabilities,
 )
 from ..entity_base import root_device_info
-from ..preferences import display_unit, display_value
+from ..preferences import display_unit, display_value, suggested_display_precision
 
 _SENSOR_DEVICE_CLASS: dict[str, SensorDeviceClass] = {
     "battery": SensorDeviceClass.BATTERY,
@@ -151,6 +151,9 @@ class CanonicalSensor(_CanonicalEntity, SensorEntity):
                 capability.spec.unit,
                 entry,
             )
+            precision = suggested_display_precision(capability.spec.unit)
+            if precision is not None:
+                self._attr_suggested_display_precision = precision
             self._attr_state_class = SensorStateClass.MEASUREMENT
         if capability.spec.sensor_device_class:
             self._attr_device_class = _SENSOR_DEVICE_CLASS[
