@@ -56,7 +56,7 @@ from .dashboard import (
     write_dashboard_yaml,
 )
 from .diagnostics import build_slot_debug_report
-from .repairs import (
+from .repair_issues import (
     async_create_missing_runtime_metadata_issue,
     async_delete_missing_runtime_metadata_issue,
 )

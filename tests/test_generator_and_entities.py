@@ -1825,7 +1825,9 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
     def test_missing_runtime_metadata_repair_issue_uses_prepare_command(self) -> None:
         install_homeassistant_stubs()
-        repairs = importlib.import_module("custom_components.hymer_connect_metadata.repairs")
+        repairs = importlib.import_module(
+            "custom_components.hymer_connect_metadata.repair_issues"
+        )
         issue_registry = importlib.import_module("homeassistant.helpers.issue_registry")
 
         issue_registry.created_issues.clear()
