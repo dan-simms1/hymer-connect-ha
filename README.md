@@ -132,6 +132,12 @@ There are four steps:
 5. Install **HYMER Connect Metadata**.
 6. Restart Home Assistant.
 
+If you previously installed Jan Tiedemann / BetaHydri's `hymer-connect-ha`
+repository through HACS, remove that old custom repository entry from HACS and
+add this repository URL instead. The two integrations use different Home
+Assistant domains, so HACS will otherwise keep checking Jan's repository for
+updates and will not offer this project's `v1.x` releases.
+
 ### Manual Install
 
 1. Copy `custom_components/hymer_connect_metadata` into your Home Assistant
