@@ -9,6 +9,7 @@ import binascii
 import json
 import re
 import shutil
+import subprocess
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -68,6 +69,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--bundle-js-url",
         help="URL of an expanded bundle.js file if the APK contains Hermes bytecode",
+    )
+    parser.add_argument(
+        "--hbc-decompiler",
+        type=Path,
+        help=(
+            "Optional path to hermes-dec 0.1.3's hbc-decompiler command. When "
+            "provided, Hermes bytecode extracted from the APK is decompiled "
+            "locally into a pseudo-JS bundle before metadata extraction."
+        ),
     )
     parser.add_argument("--work-dir", type=Path, default=DEFAULT_WORK_DIR)
     target_group = parser.add_mutually_exclusive_group()
@@ -131,6 +141,35 @@ def _is_probably_text_bundle(path: Path) -> bool:
     return printable >= int(len(decoded) * 0.9)
 
 
+def _decompile_hermes_bundle(
+    raw_bundle: Path, destination: Path, hbc_decompiler: Path
+) -> Path:
+    decompiler = hbc_decompiler.resolve()
+    if not decompiler.exists():
+        raise RuntimeError(f"hbc-decompiler not found: {decompiler}")
+    if not decompiler.is_file():
+        raise RuntimeError(f"hbc-decompiler path is not a file: {decompiler}")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            [str(decompiler), str(raw_bundle), str(destination)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as err:
+        stderr = (err.stderr or "").strip()
+        detail = f": {stderr}" if stderr else ""
+        raise RuntimeError(f"hbc-decompiler failed{detail}") from err
+
+    if not destination.exists():
+        raise RuntimeError("hbc-decompiler completed but did not write bundle.js")
+    if not _is_probably_text_bundle(destination):
+        raise RuntimeError("hbc-decompiler output is not a readable text bundle")
+    return destination.resolve()
+
+
 def _resolve_expanded_bundle(args: argparse.Namespace, work_dir: Path) -> Path:
     if args.bundle_js:
         return args.bundle_js.resolve()
@@ -149,13 +188,18 @@ def _resolve_expanded_bundle(args: argparse.Namespace, work_dir: Path) -> Path:
     raw_bundle = _extract_bundle_from_apk(apk_path, work_dir / "index.android.bundle").resolve()
     if _is_probably_text_bundle(raw_bundle):
         return raw_bundle
+    if args.hbc_decompiler:
+        return _decompile_hermes_bundle(
+            raw_bundle,
+            work_dir / "bundle.js",
+            args.hbc_decompiler,
+        )
 
     raise RuntimeError(
         "The APK contains a Hermes bytecode bundle, not an expanded bundle.js. "
-        "Download the APK with this script, then rerun with either "
-        "`--bundle-js /path/to/bundle.js` or `--bundle-js-url <url>` pointing "
-        "to an expanded bundle.js produced on your own machine or by a "
-        "community metadata workflow."
+        "Rerun with `--hbc-decompiler /path/to/hbc-decompiler` to decompile it "
+        "locally, or provide an expanded pseudo-JS bundle with "
+        "`--bundle-js /path/to/bundle.js` or `--bundle-js-url <url>`."
     )
 
 

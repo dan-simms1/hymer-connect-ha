@@ -201,14 +201,19 @@ specific one.
 
 If you are working from a downloaded file, use `--apk-path`.
 
-If the APK contains Hermes bytecode, rerun with an expanded `bundle.js`:
+If the APK contains Hermes bytecode, the script can decompile it locally when
+you provide `hbc-decompiler`. This project does not bundle that tool; the
+workflow was validated with `hermes-dec` 0.1.3:
 
 ```bash
 python3 scripts/prepare_runtime_metadata.py \
   --apk-path ~/Downloads/com.ehg.hymerconnect.apk \
-  --bundle-js /path/to/bundle.js \
+  --hbc-decompiler /path/to/hbc-decompiler \
   --zip-out hymer_connect_metadata_runtime_metadata.zip
 ```
+
+You can still provide a pre-expanded pseudo-JS bundle with `--bundle-js` if you
+already generated one yourself.
 
 Further detail:
 

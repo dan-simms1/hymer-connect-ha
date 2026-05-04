@@ -1964,6 +1964,58 @@ class GeneratorAndEntityTests(unittest.TestCase):
                 / "data",
             )
 
+    def test_prepare_runtime_metadata_decompiles_hermes_bundle_when_tool_supplied(
+        self,
+    ) -> None:
+        from scripts import prepare_runtime_metadata
+
+        with TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            apk_path = tmp_path / "hymer.apk"
+            with ZipFile(apk_path, "w") as archive:
+                archive.writestr(
+                    prepare_runtime_metadata.APK_ASSET_PATH,
+                    b"\xc6\x1f\xbc\x03synthetic hermes bytecode",
+                )
+
+            decompiler = tmp_path / "hbc-decompiler"
+            decompiler.write_text(
+                "#!/usr/bin/env python3\n"
+                "from pathlib import Path\n"
+                "import sys\n"
+                "Path(sys.argv[2]).write_text(\"_fun0: for(;;) { break; }\\n\")\n"
+            )
+            decompiler.chmod(0o755)
+
+            args = prepare_runtime_metadata.build_parser().parse_args(
+                ["--apk-path", str(apk_path), "--hbc-decompiler", str(decompiler)]
+            )
+            bundle_path = prepare_runtime_metadata._resolve_expanded_bundle(
+                args, tmp_path / "work"
+            )
+
+            self.assertEqual(bundle_path.name, "bundle.js")
+            self.assertIn("_fun0", bundle_path.read_text())
+
+    def test_prepare_runtime_metadata_explains_hermes_without_decompiler(self) -> None:
+        from scripts import prepare_runtime_metadata
+
+        with TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            apk_path = tmp_path / "hymer.apk"
+            with ZipFile(apk_path, "w") as archive:
+                archive.writestr(
+                    prepare_runtime_metadata.APK_ASSET_PATH,
+                    b"\xc6\x1f\xbc\x03synthetic hermes bytecode",
+                )
+
+            args = prepare_runtime_metadata.build_parser().parse_args(
+                ["--apk-path", str(apk_path)]
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "--hbc-decompiler"):
+                prepare_runtime_metadata._resolve_expanded_bundle(args, tmp_path / "work")
+
     def test_prepare_runtime_metadata_zip_preserves_home_assistant_layout(self) -> None:
         from scripts import prepare_runtime_metadata
 
