@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Local brand assets** — adds integration `brand/icon.png` and `brand/logo.png`
+  so Home Assistant and HACS can show a project-specific HYMER Connect Metadata
+  icon/logo without depending on the upstream HYMER Connect branding.
+
+### Documentation
+
+- **HACS migration note** — documents that users migrating from Jan Tiedemann /
+  BetaHydri's repository must remove the old HACS custom repository entry and
+  add `dan-simms1/hymer-connect-ha`, otherwise HACS will continue checking the
+  upstream repository for updates.
+
 ## [1.0.14] - 2026-05-04
 
 ### Added
