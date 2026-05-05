@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/dan-simms1/hymer-connect-ha/issues",
   "loggers": ["hymer_connect_metadata"],
   "requirements": [],
-  "version": "1.0.16"
+  "version": "1.0.17"
 }

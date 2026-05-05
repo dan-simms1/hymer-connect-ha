@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.17] - 2026-05-05
+
+### Fixed
+
+- **Windows metadata extraction** — reads expanded Hermes pseudo-JS bundles with
+  explicit UTF-8 replacement decoding so `scripts/generate_cleanroom_registry.py`
+  does not fail on Windows' default `cp1252` text encoding when the decompiled
+  bundle contains non-ASCII bytes.
+
 ## [1.0.16] - 2026-05-04
 
 ### Fixed
