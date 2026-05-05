@@ -6,5 +6,5 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `1.0.17` — fixes Windows metadata extraction from decompiled Hermes bundles by
-  using explicit UTF-8 replacement decoding for bundle reads
+- `1.0.18` — refreshes the Home Assistant/HACS brand assets with the supplied
+  campervan artwork
