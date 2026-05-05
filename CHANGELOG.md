@@ -6,6 +6,5 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `1.0.16` — preserves local runtime metadata during HACS updates, fixes the
-  internal Repair issue helper module name, and updates the brand asset to a
-  campervan-style icon/logo
+- `1.0.17` — fixes Windows metadata extraction from decompiled Hermes bundles by
+  using explicit UTF-8 replacement decoding for bundle reads

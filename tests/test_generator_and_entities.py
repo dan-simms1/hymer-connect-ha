@@ -1894,7 +1894,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         with TemporaryDirectory() as tmpdir:
             bundle_path = Path(tmpdir) / "bundle.js"
-            bundle_path.write_text(bundle_text)
+            bundle_path.write_bytes(b"\x90\n" + bundle_text.encode("utf-8"))
             outputs = generate_overlay_from_bundle(
                 bundle_path,
                 Path("custom_components/hymer_connect_metadata/pia_decoder.py"),

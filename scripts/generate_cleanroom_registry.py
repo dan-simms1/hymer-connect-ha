@@ -362,7 +362,7 @@ def _extract_bundle_runtime_data(
     slot_defs: dict[tuple[int, int], dict[str, Any]] = {}
     scenario_defs: list[dict[str, Any]] = []
 
-    with bundle_path.open() as bundle_file:
+    with bundle_path.open(encoding="utf-8", errors="replace") as bundle_file:
         for raw_line in bundle_file:
             line = raw_line.rstrip("\n")
 
@@ -489,7 +489,7 @@ def _extract_bundle_registry_data(
     vehicles: list[dict[str, Any]] = []
     vehicle_group_variant: dict[Any, Any] = {}
 
-    with bundle_path.open() as bundle_file:
+    with bundle_path.open(encoding="utf-8", errors="replace") as bundle_file:
         for raw_line in bundle_file:
             line = raw_line.rstrip("\n")
 
