@@ -1,5 +1,9 @@
 # HYMER Connect Metadata Edition
 
+<p align="center">
+  <img src="custom_components/hymer_connect_metadata/brand/logo.png" alt="HYMER Connect Metadata" width="720">
+</p>
+
 Home Assistant integration for HYMER / Erwin Hymer Group campervans and
 motorhomes with a Smart Control Unit.
 
