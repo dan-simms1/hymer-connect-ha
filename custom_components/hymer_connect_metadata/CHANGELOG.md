@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.18] - 2026-05-05
+
+### Changed
+
+- **Brand asset refresh** — replaces the generated campervan icon/logo with the
+  supplied campervan artwork rendered to the Home Assistant/HACS brand asset
+  sizes.
+
 ## [1.0.17] - 2026-05-05
 
 ### Fixed
