@@ -26,9 +26,14 @@ from homeassistant.exceptions import (
     ConfigEntryNotReady,
     HomeAssistantError,
 )
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity import EntityCategory
+
+try:
+    from homeassistant.helpers import config_validation as cv
+except ImportError:  # pragma: no cover - lightweight unit-test stubs only.
+    cv = None
 
 from .api import HymerConnectApi, HymerConnectApiError, HymerConnectAuthError
 from .capability_resolver import invalidate_capability_cache, warm_capability_cache
@@ -95,6 +100,7 @@ _GENERATED_DASHBOARD_STORAGE_ID = "storage_id"
 _STATIC_DIR = Path(__file__).with_name("static")
 
 HymerConnectConfigEntry = ConfigEntry
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN) if cv else {}
 
 
 def _bus_device_identifier_prefix(entry_id: str) -> str:

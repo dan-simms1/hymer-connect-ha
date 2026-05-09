@@ -6,5 +6,5 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `1.0.19` — improves 12 V standby/retry handling, aligns SCU signal metadata,
-  and adds initial European localisation files
+- `1.0.20` — adds HACS/Hassfest validation workflows and declares dashboard
+  dependencies required by Hassfest

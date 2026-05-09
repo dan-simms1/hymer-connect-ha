@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.20] - 2026-05-09
+
+### Changed
+
+- **HACS submission readiness** — adds HACS and Hassfest validation workflows.
+- **Dashboard dependency declaration** — declares Home Assistant `http` and
+  `lovelace` dependencies in the manifest because the generated-dashboard
+  service uses static paths and Lovelace storage APIs.
+
+### Fixed
+
+- **Hassfest config-schema warning** — declares the integration as config-entry
+  only for YAML setup validation.
+
 ## [1.0.19] - 2026-05-09
 
 ### Added
