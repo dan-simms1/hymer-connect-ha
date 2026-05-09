@@ -6,5 +6,5 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `1.0.18` — refreshes the Home Assistant/HACS brand assets with the supplied
-  campervan artwork
+- `1.0.19` — improves 12 V standby/retry handling, aligns SCU signal metadata,
+  and adds initial European localisation files

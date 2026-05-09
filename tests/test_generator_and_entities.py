@@ -989,6 +989,61 @@ class GeneratorAndEntityTests(unittest.TestCase):
         finally:
             signalr_mod.main_switch_slots = original_main_switch_slots
 
+    def test_main_switch_readback_schedules_standby_entry_refresh(self) -> None:
+        ensure_package_paths()
+        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
+        pia_decoder = importlib.import_module("custom_components.hymer_connect_metadata.pia_decoder")
+        cls = signalr_mod.HymerSignalRClient
+
+        original_main_switch_slots = signalr_mod.main_switch_slots
+        signalr_mod.main_switch_slots = lambda: frozenset({(3, 1)})
+        try:
+            sensor = (
+                pia_decoder._encode_varint_field(1, 1)
+                + pia_decoder._encode_varint_field(2, 3)
+                + pia_decoder._encode_str_field(4, "Off")
+            )
+            response_payload = base64.b64encode(
+                pia_decoder._encode_varint_field(1, 12345)
+                + pia_decoder._encode_varint_field(2, pia_decoder.STATUS_SUCCESS)
+                + pia_decoder._encode_varint_field(3, 1765109862)
+                + pia_decoder._encode_bytes_field(
+                    5,
+                    pia_decoder._encode_bytes_field(1, sensor),
+                )
+            ).decode("ascii")
+
+            async def run_test() -> None:
+                client = cls(
+                    api=object(),
+                    session=object(),
+                    vehicle_urn="vehicle",
+                    scu_urn="scu",
+                    known_slots={(3, 1)},
+                )
+                client._slot_data[(3, 1)] = "On"
+                scheduled: list[str] = []
+
+                async def fake_entry_refresh() -> None:
+                    scheduled.append("entry")
+
+                client._run_standby_entry_refresh = fake_entry_refresh
+                client._handle_message(
+                    {
+                        "type": signalr_mod.MSG_TYPE_INVOCATION,
+                        "target": "PiaResponse",
+                        "arguments": [response_payload],
+                    }
+                )
+                await asyncio.sleep(0)
+
+                self.assertEqual(client._slot_data[(3, 1)], "Off")
+                self.assertEqual(scheduled, ["entry"])
+
+            asyncio.run(run_test())
+        finally:
+            signalr_mod.main_switch_slots = original_main_switch_slots
+
     def test_main_switch_command_ack_does_not_fake_standby_state(self) -> None:
         ensure_package_paths()
         signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
@@ -1181,6 +1236,42 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         self.assertFalse(switch.is_on)
         self.assertIsNone(switch._optimistic)
+
+    def test_main_switch_readback_mismatch_forces_reconnect_and_one_retry(self) -> None:
+        install_homeassistant_stubs()
+        entity_base = importlib.import_module("custom_components.hymer_connect_metadata.entity_base")
+        cls = entity_base.HymerSwitch
+
+        class Coordinator:
+            habitation_power_state = True
+
+            def __init__(self) -> None:
+                self.recoveries: list[str] = []
+
+            async def async_recover_signalr_command_path(self, reason: str) -> None:
+                self.recoveries.append(reason)
+
+        async def run_test() -> None:
+            coordinator = Coordinator()
+            switch = cls.__new__(cls)
+            switch.coordinator = coordinator
+            switch._main_switch_command_at = 42.0
+            switch._main_switch_command_expected = False
+            switch._optimistic = False
+            switch._raw_is_on = lambda: True
+            switch.async_write_ha_state = lambda: None
+            retries: list[tuple[bool, bool]] = []
+
+            async def fake_send(on: bool, *, verify: bool = True) -> None:
+                retries.append((on, verify))
+
+            switch._send = fake_send
+            await switch._verify_main_switch_readback(False, 42.0, 0)
+
+            self.assertEqual(len(coordinator.recoveries), 1)
+            self.assertEqual(retries, [(False, False)])
+
+        asyncio.run(run_test())
 
     def test_number_select_and_text_optimistic_state_expires(self) -> None:
         install_homeassistant_stubs()

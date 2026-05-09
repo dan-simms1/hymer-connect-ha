@@ -59,6 +59,7 @@ class ReplayFixtureTests(unittest.TestCase):
         }
         self.assertEqual(resolved["fresh_water_level"], (3, 8))
         self.assertEqual(resolved["waste_water_level"], (3, 9))
+        self.assertEqual(resolved["lte_connection_quality"], (30, 3))
         self.assertEqual(resolved["scu_voltage"], (30, 5))
         self.assertEqual(resolved["lte_connection_state"], (30, 4))
         self.assertEqual(resolved["vehicle_movement"], (30, 14))

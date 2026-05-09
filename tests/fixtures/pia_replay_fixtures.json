@@ -9,6 +9,7 @@
             {"component_id": 3, "sensor_id": 8, "uint_value": 0},
             {"component_id": 3, "sensor_id": 9, "uint_value": 0},
             {"component_id": 22, "sensor_id": 2, "uint_value": 100},
+            {"component_id": 30, "sensor_id": 3, "str_value": "Ok"},
             {"component_id": 30, "sensor_id": 4, "bool_value": true},
             {"component_id": 30, "sensor_id": 5, "float_value": 13.6},
             {"component_id": 30, "sensor_id": 8, "bool_value": false},

@@ -8,7 +8,7 @@
     "6": {"kind": "truma_heater", "name": "Truma Heater"},
     "7": {"kind": "air_conditioner", "name": "Air Conditioner"},
     "12": {"kind": "light", "name": "Lighting Zone"},
-    "30": {"kind": "gps", "name": "GPS Module"},
+    "30": {"kind": "scu_signals", "name": "SCU Signals"},
     "34": {"kind": "fridge", "name": "Fridge"},
     "56": {"kind": "toilet", "name": "Toilet Module"},
     "95": {"kind": "air_conditioner", "name": "Airxcel Climate"},

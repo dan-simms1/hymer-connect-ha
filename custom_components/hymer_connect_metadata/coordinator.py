@@ -452,6 +452,21 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "Command failed after reconnect and retry. Try reloading the integration."
         )
 
+    async def async_recover_signalr_command_path(self, reason: str) -> None:
+        """Force the SignalR command path through the fast reconnect route."""
+        _LOGGER.warning(
+            "%s for %s — forcing SignalR reconnect",
+            reason,
+            self.config_entry.title,
+        )
+        client = self._signalr
+        if client is not None:
+            client.mark_disconnected()
+        self._last_reconnect_attempt = 0.0
+        self._reconnect_backoff = _INITIAL_BACKOFF
+        self._on_signalr_connection_lost()
+        await asyncio.sleep(0)
+
     async def async_send_light_command(
         self,
         bus_id: int,

@@ -104,6 +104,7 @@ class HymerSignalRClient:
         self._waiting_request_ids: list[int] = []
         self._token_refresh_task: asyncio.Task | None = None
         self._standby_wake_refresh_task: asyncio.Task | None = None
+        self._standby_entry_refresh_task: asyncio.Task | None = None
         self._known_slots = frozenset(known_slots or ())
 
     @property
@@ -186,6 +187,11 @@ class HymerSignalRClient:
         if self._standby_wake_refresh_task is task:
             self._standby_wake_refresh_task = None
 
+    def _clear_standby_entry_refresh_task(self, task: asyncio.Task) -> None:
+        """Drop the standby-entry refresh task reference once it finishes."""
+        if self._standby_entry_refresh_task is task:
+            self._standby_entry_refresh_task = None
+
     def _schedule_standby_wake_refresh(self) -> None:
         """Refresh hub auth and subscriptions after the SCU wakes from standby."""
         if (
@@ -200,6 +206,21 @@ class HymerSignalRClient:
         task = asyncio.create_task(self._run_standby_wake_refresh())
         task.add_done_callback(self._clear_standby_wake_refresh_task)
         self._standby_wake_refresh_task = task
+
+    def _schedule_standby_entry_refresh(self) -> None:
+        """Refresh hub auth when the SCU enters standby without resubscribing."""
+        if (
+            self._standby_entry_refresh_task is not None
+            and not self._standby_entry_refresh_task.done()
+        ):
+            _LOGGER.debug(
+                "Standby-entry SignalR refresh already scheduled for %s",
+                self._vehicle_urn,
+            )
+            return
+        task = asyncio.create_task(self._run_standby_entry_refresh())
+        task.add_done_callback(self._clear_standby_entry_refresh_task)
+        self._standby_entry_refresh_task = task
 
     async def _run_standby_wake_refresh(self) -> None:
         """Re-authenticate and resubscribe after the SCU reports a 12V wake."""
@@ -221,6 +242,33 @@ class HymerSignalRClient:
         except Exception:
             _LOGGER.warning(
                 "Post-standby SignalR refresh failed for %s",
+                self._vehicle_urn,
+                exc_info=True,
+            )
+            self._connected = False
+            self._notify_connection_lost()
+
+    async def _run_standby_entry_refresh(self) -> None:
+        """Re-authenticate after the SCU reports 12V standby.
+
+        The SCU can echo stale cached slot state when resubscribing during
+        standby entry, so this path refreshes DataHub routing only.
+        """
+        try:
+            _LOGGER.info(
+                "SCU standby detected for %s — refreshing SignalR tokens without resubscribe",
+                self._vehicle_urn,
+            )
+            await asyncio.sleep(STANDBY_WAKE_UPDATE_TOKENS_DELAY)
+            if not self.connected:
+                return
+            if not await self._send_update_tokens(wait_response=True):
+                raise HymerConnectApiError("Standby-entry UpdateTokens failed")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _LOGGER.warning(
+                "Standby-entry SignalR refresh failed for %s",
                 self._vehicle_urn,
                 exc_info=True,
             )
@@ -568,6 +616,8 @@ class HymerSignalRClient:
                 )
                 if was_standby and not is_standby:
                     self._schedule_standby_wake_refresh()
+                elif not was_standby and is_standby:
+                    self._schedule_standby_entry_refresh()
                 if self._on_sensor_update:
                     self._on_sensor_update(slot_data)
 
@@ -664,6 +714,14 @@ class HymerSignalRClient:
                     pass
                 finally:
                     self._standby_wake_refresh_task = None
+            if self._standby_entry_refresh_task is not None:
+                self._standby_entry_refresh_task.cancel()
+                try:
+                    await self._standby_entry_refresh_task
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    self._standby_entry_refresh_task = None
             err = HymerConnectApiError("SignalR connection closed")
             for future in self._completion_futures.values():
                 if not future.done():
@@ -860,6 +918,13 @@ class HymerSignalRClient:
             except asyncio.CancelledError:
                 pass
         self._standby_wake_refresh_task = None
+        if self._standby_entry_refresh_task and not self._standby_entry_refresh_task.done():
+            self._standby_entry_refresh_task.cancel()
+            try:
+                await self._standby_entry_refresh_task
+            except asyncio.CancelledError:
+                pass
+        self._standby_entry_refresh_task = None
         if self._ws and not self._ws.closed:
             await self._ws.close()
         if self._task and not self._task.done():

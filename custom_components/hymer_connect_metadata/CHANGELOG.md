@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.19] - 2026-05-09
+
+### Added
+
+- **European localisation preview** — adds initial German, Swiss German,
+  French, Spanish, Italian, Dutch, Swedish, and Danish translation files for
+  setup, options, repairs, and the highest-visibility vehicle entities.
+
+### Changed
+
+- **SCU signal metadata alignment** — treats bus 30 slot 3 as LTE connection
+  quality and bus 30 as SCU signals in the synthetic fixtures, matching the
+  current app-derived metadata model.
+- **Heater safety naming** — renames the previous heater-window wording to
+  "Heater Diesel Safety" to avoid implying that the value is a user-facing
+  window contact.
+
+### Fixed
+
+- **12 V standby-entry routing** — when the SCU enters standby, SignalR now
+  refreshes `UpdateTokens` without resubscribing, avoiding stale state echoes
+  while keeping the command route fresh.
+- **12 V main-switch readback recovery** — main-switch commands now get a
+  delayed readback check; if the SCU still reports the old state, the
+  coordinator forces a SignalR reconnect and retries the command once.
+
 ## [1.0.18] - 2026-05-05
 
 ### Changed

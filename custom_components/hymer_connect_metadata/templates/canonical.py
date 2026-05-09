@@ -8,6 +8,7 @@ component families without removing the generic per-slot fallback layer.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -193,12 +194,15 @@ class CanonicalBinarySensor(_CanonicalEntity, BinarySensorEntity):
 
 class CanonicalSwitch(_CanonicalEntity, SwitchEntity):
     _MAIN_SWITCH_OFF_HOLDOFF_S = 30.0
+    _MAIN_SWITCH_ON_VERIFY_S = 60.0
     _OPTIMISTIC_TTL_S = 15.0
 
     def __init__(self, coordinator, entry, capability: ResolvedCapability) -> None:
         super().__init__(coordinator, entry, capability)
         self._optimistic: bool | None = None
         self._optimistic_set_at: float = 0.0
+        self._main_switch_command_at: float = 0.0
+        self._main_switch_command_expected: bool | None = None
 
     def _raw_is_on(self) -> bool | None:
         value = self._raw()
@@ -210,12 +214,15 @@ class CanonicalSwitch(_CanonicalEntity, SwitchEntity):
             return value.upper() in {"ON", "TRUE", "YES"}
         return bool(value)
 
+    def _is_main_switch(self) -> bool:
+        return self._capability.spec.key == "main_switch"
+
     def _expire_optimistic(self) -> None:
         if self._optimistic is None:
             return
         elapsed = time.monotonic() - self._optimistic_set_at
         ttl = self._MAIN_SWITCH_OFF_HOLDOFF_S
-        if self._capability.spec.key != "main_switch":
+        if not self._is_main_switch():
             ttl = self._OPTIMISTIC_TTL_S
         if elapsed >= ttl:
             self._optimistic = None
@@ -236,7 +243,63 @@ class CanonicalSwitch(_CanonicalEntity, SwitchEntity):
             return self._optimistic
         return self._raw_is_on()
 
-    async def _send(self, on: bool) -> None:
+    def _track_task(self, task: asyncio.Task) -> None:
+        track = getattr(self.coordinator, "track_background_task", None)
+        if callable(track):
+            track(task)
+
+    def _create_task(self, coro) -> asyncio.Task:
+        hass = getattr(self.coordinator, "hass", None)
+        if hass is not None and hasattr(hass, "async_create_task"):
+            task = hass.async_create_task(coro)
+        else:
+            task = asyncio.create_task(coro)
+        self._track_task(task)
+        return task
+
+    def _schedule_main_switch_verification(self, expected_on: bool) -> None:
+        if not self._is_main_switch():
+            return
+        command_at = self._main_switch_command_at
+        delay = (
+            self._MAIN_SWITCH_ON_VERIFY_S
+            if expected_on
+            else self._MAIN_SWITCH_OFF_HOLDOFF_S
+        )
+        self._create_task(
+            self._verify_main_switch_readback(expected_on, command_at, delay)
+        )
+
+    async def _verify_main_switch_readback(
+        self,
+        expected_on: bool,
+        command_at: float,
+        delay: float,
+    ) -> None:
+        await asyncio.sleep(delay)
+        if (
+            self._main_switch_command_at != command_at
+            or self._main_switch_command_expected is not expected_on
+        ):
+            return
+        actual = self._raw_is_on()
+        if actual is not None and bool(actual) == expected_on:
+            self._optimistic = None
+            self._main_switch_command_expected = None
+            self.async_write_ha_state()
+            return
+        if expected_on is False and self.coordinator.habitation_power_state is False:
+            self._optimistic = None
+            self._main_switch_command_expected = None
+            self.async_write_ha_state()
+            return
+
+        await self.coordinator.async_recover_signalr_command_path(
+            f"12V main switch readback stayed {actual!r} after command to {expected_on}"
+        )
+        await self._send(expected_on, verify=False)
+
+    async def _send(self, on: bool, *, verify: bool = True) -> None:
         capability = self._current_capability()
         client = await self.coordinator.async_ensure_signalr_connected()
         if capability.candidate.write_style == "string_on_off":
@@ -253,6 +316,11 @@ class CanonicalSwitch(_CanonicalEntity, SwitchEntity):
             )
         self._optimistic = on
         self._optimistic_set_at = time.monotonic()
+        if self._is_main_switch():
+            self._main_switch_command_at = self._optimistic_set_at
+            self._main_switch_command_expected = on
+            if verify:
+                self._schedule_main_switch_verification(on)
         self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs):
@@ -266,7 +334,7 @@ class CanonicalSwitch(_CanonicalEntity, SwitchEntity):
         if self._optimistic is not None:
             actual = self._raw_is_on()
             if (
-                self._capability.spec.key == "main_switch"
+                self._is_main_switch()
                 and self._optimistic is False
             ):
                 value = self._raw()

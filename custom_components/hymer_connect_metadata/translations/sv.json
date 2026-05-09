@@ -1,0 +1,174 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HYMER Connect Metadata-inloggning",
+        "description": "Ange uppgifterna f\u00f6r ditt HYMER Connect-konto. F\u00f6rbered och installera f\u00f6rst det lokala runtime-metadatapaketet och anv\u00e4nd sedan samma e-postadress och l\u00f6senord som i HYMER Connect-appen.",
+        "data": {
+          "brand": "M\u00e4rke",
+          "username": "E-post",
+          "password": "L\u00f6senord"
+        }
+      },
+      "select_vehicle": {
+        "title": "V\u00e4lj fordon",
+        "description": "V\u00e4lj vilket fordon som ska l\u00e4ggas till som en separat Home Assistant-post. Du kan l\u00e4gga till den app-extraherade Remote Access Token nu eller senare via Konfigurera om.",
+        "data": {
+          "selected_vehicle": "Fordon",
+          "ehg_refresh_token": "EHG Remote Access Refresh Token (valfritt)"
+        },
+        "data_description": {
+          "ehg_refresh_token": "Beh\u00f6vs f\u00f6r live SignalR-telemetri och styrning. Du kan l\u00e4mna detta tomt nu och l\u00e4gga till token senare fr\u00e5n konfigurationspostens meny."
+        }
+      },
+      "reauth_confirm": {
+        "title": "[%key:common::config_flow::title::reauth%]",
+        "description": "HYMER Connect Metadata-integrationen beh\u00f6ver autentisera ditt konto igen.",
+        "data": {
+          "username": "E-post",
+          "password": "L\u00f6senord"
+        }
+      },
+      "reconfigure": {
+        "title": "Uppdatera Remote Access Token",
+        "description": "Uppdatera den app-extraherade EHG Remote Access Refresh Token f\u00f6r detta fordon. L\u00e4mna f\u00e4ltet tomt f\u00f6r att ta bort lagrad token.",
+        "data": {
+          "ehg_refresh_token": "EHG Remote Access Refresh Token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Kunde inte ansluta till HYMER Connect API",
+      "invalid_auth": "Ogiltig e-postadress eller ogiltigt l\u00f6senord",
+      "missing_runtime_metadata": "F\u00f6rbered och installera det lokala runtime-metadatapaketet innan du loggar in",
+      "invalid_remote_access_token": "Remote Access Token kunde inte valideras f\u00f6r detta fordon",
+      "no_vehicles": "Inga fordon hittades f\u00f6r detta konto",
+      "vehicle_not_found": "Det konfigurerade fordonet kunde inte hittas i detta konto",
+      "wrong_account": "De nya inloggningsuppgifterna har inte \u00e5tkomst till det konfigurerade fordonet",
+      "unknown": "Ov\u00e4ntat fel intr\u00e4ffade"
+    },
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+      "reconfigure_successful": "Omkonfigureringen lyckades"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Visnings- och fels\u00f6kningsalternativ",
+        "description": "Konfigurera valfria fels\u00f6kningsentiteter och visningsenheter f\u00f6r denna fordonspost.",
+        "data": {
+          "show_admin_actions": "Visa administrat\u00f6rs\u00e5tg\u00e4rder",
+          "show_debug_diagnostics": "Visa fels\u00f6kningsdiagnostik",
+          "use_miles": "Visa avst\u00e5nd i miles",
+          "use_fahrenheit": "Visa temperaturer i Fahrenheit"
+        }
+      }
+    }
+  },
+  "issues": {
+    "missing_runtime_metadata": {
+      "title": "Lokala HYMER runtime-metadata saknas",
+      "description": "HYMER Connect Metadata kan inte slutf\u00f6ra konfigurationen eftersom det lokala runtime-metadatapaketet saknas.\n\nSaknade filer: {missing_files}\n\nFr\u00e5n en fullst\u00e4ndig checkout av detta repository p\u00e5 valfri dator, f\u00f6rbered metadatapaketet med:\n```\n{prepare_command}\n```\n\nOm APK-filen inneh\u00e5ller ett Hermes bytecode-bundle, k\u00f6r kommandot igen med `--bundle-js` eller `--bundle-js-url`. Packa sedan upp den genererade zip-filen till `custom_components/hymer_connect_metadata/data/` i Home Assistant-konfigurationskatalogen och ladda om integrationen."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_soc": {
+        "name": "Bodelsbatteri laddningsniv\u00e5"
+      },
+      "distance_to_service": {
+        "name": "Avst\u00e5nd till service"
+      },
+      "fuel_level": {
+        "name": "Br\u00e4nsleniv\u00e5"
+      },
+      "fresh_water_level": {
+        "name": "F\u00e4rskvattenniv\u00e5"
+      },
+      "grey_cartridge_level": {
+        "name": "Gr\u00e5vattencassett niv\u00e5"
+      },
+      "lte_connection_quality": {
+        "name": "LTE-signalkvalitet"
+      },
+      "lte_connection_state": {
+        "name": "LTE-anslutningsstatus"
+      },
+      "odometer": {
+        "name": "V\u00e4gm\u00e4tare"
+      },
+      "outside_temperature": {
+        "name": "Utomhustemperatur"
+      },
+      "scu_voltage": {
+        "name": "SCU-sp\u00e4nning"
+      },
+      "vehicle_model": {
+        "name": "Modell"
+      },
+      "vehicle_model_year": {
+        "name": "Modell\u00e5r"
+      },
+      "vehicle_vin": {
+        "name": "VIN"
+      },
+      "waste_water_level": {
+        "name": "Gr\u00e5vattenniv\u00e5"
+      }
+    },
+    "binary_sensor": {
+      "battery_cutoff_switch": {
+        "name": "Bodelsbatteri fr\u00e5nskiljare"
+      },
+      "fridge_door_open": {
+        "name": "Kylsk\u00e5psd\u00f6rr \u00f6ppen"
+      },
+      "heater_window_closed": {
+        "name": "Diesels\u00e4kerhet v\u00e4rmare"
+      },
+      "lte_connection_state": {
+        "name": "LTE-anslutningsstatus"
+      },
+      "scu_shoreline_connected": {
+        "name": "SCU landstr\u00f6m ansluten"
+      },
+      "vehicle_movement": {
+        "name": "Fordonsr\u00f6relse"
+      }
+    },
+    "switch": {
+      "fridge_eco": {
+        "name": "Kylsk\u00e5p Eco"
+      },
+      "main_switch": {
+        "name": "12 V-brytare"
+      },
+      "night_mode": {
+        "name": "Tyst l\u00e4ge"
+      },
+      "water_pump": {
+        "name": "Vattenpump"
+      }
+    },
+    "number": {
+      "heater_power_limit": {
+        "name": "V\u00e4rmare elektrisk effektgr\u00e4ns"
+      }
+    },
+    "select": {
+      "boiler_mode_ctrl": {
+        "name": "Boilerl\u00e4ge"
+      },
+      "heater_energy_ctrl": {
+        "name": "V\u00e4rmare energik\u00e4lla"
+      },
+      "water_heater_mode": {
+        "name": "Varmvattenl\u00e4ge"
+      }
+    },
+    "climate": {},
+    "light": {}
+  }
+}

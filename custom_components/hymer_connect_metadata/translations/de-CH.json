@@ -1,0 +1,174 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HYMER Connect Metadata Anmeldung",
+        "description": "Gib deine HYMER Connect Zugangsdaten ein. Erstelle und installiere zuerst das lokale Runtime-Metadatenpaket und verwende dann dieselbe E-Mail-Adresse und dasselbe Passwort wie in der HYMER Connect App.",
+        "data": {
+          "brand": "Marke",
+          "username": "E-Mail",
+          "password": "Passwort"
+        }
+      },
+      "select_vehicle": {
+        "title": "Fahrzeug ausw\u00e4hlen",
+        "description": "W\u00e4hle aus, welches Fahrzeug als eigener Home Assistant Eintrag hinzugef\u00fcgt werden soll. Du kannst den aus der App extrahierten Remote-Access-Token jetzt oder sp\u00e4ter \u00fcber Neu konfigurieren hinzuf\u00fcgen.",
+        "data": {
+          "selected_vehicle": "Fahrzeug",
+          "ehg_refresh_token": "EHG Remote Access Refresh Token (optional)"
+        },
+        "data_description": {
+          "ehg_refresh_token": "Wird f\u00fcr Live-SignalR-Telemetrie und Steuerung ben\u00f6tigt. Du kannst das Feld vorerst leer lassen und den Token sp\u00e4ter \u00fcber das Men\u00fc des Konfigurationseintrags hinzuf\u00fcgen."
+        }
+      },
+      "reauth_confirm": {
+        "title": "[%key:common::config_flow::title::reauth%]",
+        "description": "HYMER Connect Metadata muss dein Konto erneut authentifizieren.",
+        "data": {
+          "username": "E-Mail",
+          "password": "Passwort"
+        }
+      },
+      "reconfigure": {
+        "title": "Remote Access Token aktualisieren",
+        "description": "Aktualisiere den aus der App extrahierten EHG Remote Access Refresh Token f\u00fcr dieses Fahrzeug. Lass das Feld leer, um den gespeicherten Token zu entfernen.",
+        "data": {
+          "ehg_refresh_token": "EHG Remote Access Refresh Token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zur HYMER Connect API fehlgeschlagen",
+      "invalid_auth": "Ung\u00fcltige E-Mail-Adresse oder ung\u00fcltiges Passwort",
+      "missing_runtime_metadata": "Erstelle und installiere das lokale Runtime-Metadatenpaket vor der Anmeldung",
+      "invalid_remote_access_token": "Der Remote Access Token konnte f\u00fcr dieses Fahrzeug nicht validiert werden",
+      "no_vehicles": "F\u00fcr dieses Konto wurden keine Fahrzeuge gefunden",
+      "vehicle_not_found": "Das konfigurierte Fahrzeug konnte in diesem Konto nicht gefunden werden",
+      "wrong_account": "Die neuen Zugangsdaten haben keinen Zugriff auf das konfigurierte Fahrzeug",
+      "unknown": "Unerwarteter Fehler"
+    },
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+      "reconfigure_successful": "Neu konfigurieren war erfolgreich"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Anzeige- und Debugoptionen",
+        "description": "Konfiguriere optionale Debug-Entit\u00e4ten und Anzeigeeinheiten f\u00fcr diesen Fahrzeugeintrag.",
+        "data": {
+          "show_admin_actions": "Admin-Aktionen anzeigen",
+          "show_debug_diagnostics": "Debug-Diagnose anzeigen",
+          "use_miles": "Entfernungen in Meilen anzeigen",
+          "use_fahrenheit": "Temperaturen in Fahrenheit anzeigen"
+        }
+      }
+    }
+  },
+  "issues": {
+    "missing_runtime_metadata": {
+      "title": "Lokale HYMER Runtime-Metadaten fehlen",
+      "description": "HYMER Connect Metadata kann die Einrichtung nicht abschliessen, weil das lokale Runtime-Metadatenpaket fehlt.\n\nFehlende Dateien: {missing_files}\n\nErstelle das Metadatenpaket aus einem vollst\u00e4ndigen Checkout dieses Repositorys auf einem beliebigen Rechner mit:\n```\n{prepare_command}\n```\n\nWenn die APK ein Hermes-Bytecode-Bundle enth\u00e4lt, f\u00fchre den Befehl erneut mit `--bundle-js` oder `--bundle-js-url` aus. Entpacke dann die erzeugte ZIP-Datei nach `custom_components/hymer_connect_metadata/data/` im Home Assistant Konfigurationsverzeichnis und lade die Integration neu."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_soc": {
+        "name": "Wohnraumbatterie Ladezustand"
+      },
+      "distance_to_service": {
+        "name": "Distanz bis Service"
+      },
+      "fuel_level": {
+        "name": "Kraftstoffstand"
+      },
+      "fresh_water_level": {
+        "name": "Frischwasserstand"
+      },
+      "grey_cartridge_level": {
+        "name": "Grauwasser-Kartuschenstand"
+      },
+      "lte_connection_quality": {
+        "name": "LTE Signalqualit\u00e4t"
+      },
+      "lte_connection_state": {
+        "name": "LTE Verbindungsstatus"
+      },
+      "odometer": {
+        "name": "Kilometerstand"
+      },
+      "outside_temperature": {
+        "name": "Aussentemperatur"
+      },
+      "scu_voltage": {
+        "name": "SCU Spannung"
+      },
+      "vehicle_model": {
+        "name": "Modell"
+      },
+      "vehicle_model_year": {
+        "name": "Modelljahr"
+      },
+      "vehicle_vin": {
+        "name": "FIN"
+      },
+      "waste_water_level": {
+        "name": "Grauwasserstand"
+      }
+    },
+    "binary_sensor": {
+      "battery_cutoff_switch": {
+        "name": "Wohnraumbatterie-Trennschalter"
+      },
+      "fridge_door_open": {
+        "name": "K\u00fchlschrankt\u00fcr offen"
+      },
+      "heater_window_closed": {
+        "name": "Heizung Diesel-Sicherheitskontakt"
+      },
+      "lte_connection_state": {
+        "name": "LTE Verbindungsstatus"
+      },
+      "scu_shoreline_connected": {
+        "name": "SCU Landstrom verbunden"
+      },
+      "vehicle_movement": {
+        "name": "Fahrzeugbewegung"
+      }
+    },
+    "switch": {
+      "fridge_eco": {
+        "name": "K\u00fchlschrank Eco"
+      },
+      "main_switch": {
+        "name": "12-V-Schalter"
+      },
+      "night_mode": {
+        "name": "Leisemodus"
+      },
+      "water_pump": {
+        "name": "Wasserpumpe"
+      }
+    },
+    "number": {
+      "heater_power_limit": {
+        "name": "Heizung elektrische Leistungsgrenze"
+      }
+    },
+    "select": {
+      "boiler_mode_ctrl": {
+        "name": "Boiler-Modus"
+      },
+      "heater_energy_ctrl": {
+        "name": "Heizung Energiequelle"
+      },
+      "water_heater_mode": {
+        "name": "Warmwasser-Modus"
+      }
+    },
+    "climate": {},
+    "light": {}
+  }
+}

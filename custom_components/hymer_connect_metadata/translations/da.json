@@ -1,0 +1,174 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HYMER Connect Metadata-login",
+        "description": "Indtast dine HYMER Connect-kontooplysninger. Klarg\u00f8r og installer f\u00f8rst den lokale runtime-metadatapakke, og brug derefter samme e-mail og adgangskode som i HYMER Connect-appen.",
+        "data": {
+          "brand": "M\u00e6rke",
+          "username": "E-mail",
+          "password": "Adgangskode"
+        }
+      },
+      "select_vehicle": {
+        "title": "V\u00e6lg k\u00f8ret\u00f8j",
+        "description": "V\u00e6lg hvilket k\u00f8ret\u00f8j der skal tilf\u00f8jes som en separat Home Assistant-post. Du kan tilf\u00f8je den app-udtrukne Remote Access Token nu eller senere via Konfigurer igen.",
+        "data": {
+          "selected_vehicle": "K\u00f8ret\u00f8j",
+          "ehg_refresh_token": "EHG Remote Access Refresh Token (valgfri)"
+        },
+        "data_description": {
+          "ehg_refresh_token": "Kr\u00e6ves til live SignalR-telemetri og styring. Du kan lade feltet v\u00e6re tomt nu og tilf\u00f8je token senere fra konfigurationspostens menu."
+        }
+      },
+      "reauth_confirm": {
+        "title": "[%key:common::config_flow::title::reauth%]",
+        "description": "HYMER Connect Metadata-integrationen skal genautentificere din konto.",
+        "data": {
+          "username": "E-mail",
+          "password": "Adgangskode"
+        }
+      },
+      "reconfigure": {
+        "title": "Opdater Remote Access Token",
+        "description": "Opdater den app-udtrukne EHG Remote Access Refresh Token for dette k\u00f8ret\u00f8j. Lad feltet v\u00e6re tomt for at fjerne den gemte token.",
+        "data": {
+          "ehg_refresh_token": "EHG Remote Access Refresh Token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Kunne ikke oprette forbindelse til HYMER Connect API",
+      "invalid_auth": "Ugyldig e-mail eller adgangskode",
+      "missing_runtime_metadata": "Klarg\u00f8r og installer den lokale runtime-metadatapakke, f\u00f8r du logger ind",
+      "invalid_remote_access_token": "Remote Access Token kunne ikke valideres for dette k\u00f8ret\u00f8j",
+      "no_vehicles": "Der blev ikke fundet k\u00f8ret\u00f8jer for denne konto",
+      "vehicle_not_found": "Det konfigurerede k\u00f8ret\u00f8j kunne ikke findes p\u00e5 denne konto",
+      "wrong_account": "De nye legitimationsoplysninger har ikke adgang til det konfigurerede k\u00f8ret\u00f8j",
+      "unknown": "Der opstod en uventet fejl"
+    },
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+      "reconfigure_successful": "Genkonfigurationen lykkedes"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Visnings- og fejlfindingsindstillinger",
+        "description": "Konfigurer valgfrie fejls\u00f8gningsentiteter og visningsenheder for denne k\u00f8ret\u00f8jspost.",
+        "data": {
+          "show_admin_actions": "Vis administratorhandlinger",
+          "show_debug_diagnostics": "Vis fejls\u00f8gningsdiagnostik",
+          "use_miles": "Vis afstande i miles",
+          "use_fahrenheit": "Vis temperaturer i Fahrenheit"
+        }
+      }
+    }
+  },
+  "issues": {
+    "missing_runtime_metadata": {
+      "title": "Lokale HYMER runtime-metadata mangler",
+      "description": "HYMER Connect Metadata kan ikke afslutte ops\u00e6tningen, fordi den lokale runtime-metadatapakke mangler.\n\nManglende filer: {missing_files}\n\nFra en komplet checkout af dette repository p\u00e5 en hvilken som helst maskine skal du klarg\u00f8re metadatapakken med:\n```\n{prepare_command}\n```\n\nHvis APK'en indeholder et Hermes bytecode-bundle, skal du k\u00f8re kommandoen igen med `--bundle-js` eller `--bundle-js-url`. Pak derefter den genererede zip-fil ud til `custom_components/hymer_connect_metadata/data/` i Home Assistant-konfigurationsmappen og genindl\u00e6s integrationen."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_soc": {
+        "name": "Bodelsbatteri ladetilstand"
+      },
+      "distance_to_service": {
+        "name": "Afstand til service"
+      },
+      "fuel_level": {
+        "name": "Br\u00e6ndstofniveau"
+      },
+      "fresh_water_level": {
+        "name": "Friskvandsniveau"
+      },
+      "grey_cartridge_level": {
+        "name": "Gr\u00e5vandskassette niveau"
+      },
+      "lte_connection_quality": {
+        "name": "LTE-signalkvalitet"
+      },
+      "lte_connection_state": {
+        "name": "LTE-forbindelsesstatus"
+      },
+      "odometer": {
+        "name": "Kilometert\u00e6ller"
+      },
+      "outside_temperature": {
+        "name": "Udetemperatur"
+      },
+      "scu_voltage": {
+        "name": "SCU-sp\u00e6nding"
+      },
+      "vehicle_model": {
+        "name": "Model"
+      },
+      "vehicle_model_year": {
+        "name": "Model\u00e5r"
+      },
+      "vehicle_vin": {
+        "name": "VIN"
+      },
+      "waste_water_level": {
+        "name": "Gr\u00e5vandsniveau"
+      }
+    },
+    "binary_sensor": {
+      "battery_cutoff_switch": {
+        "name": "Bodelsbatteri afbryder"
+      },
+      "fridge_door_open": {
+        "name": "K\u00f8leskabsd\u00f8r \u00e5ben"
+      },
+      "heater_window_closed": {
+        "name": "Dieselsikkerhed varme"
+      },
+      "lte_connection_state": {
+        "name": "LTE-forbindelsesstatus"
+      },
+      "scu_shoreline_connected": {
+        "name": "SCU landstr\u00f8m tilsluttet"
+      },
+      "vehicle_movement": {
+        "name": "K\u00f8ret\u00f8jsbev\u00e6gelse"
+      }
+    },
+    "switch": {
+      "fridge_eco": {
+        "name": "K\u00f8leskab Eco"
+      },
+      "main_switch": {
+        "name": "12 V-afbryder"
+      },
+      "night_mode": {
+        "name": "Stille tilstand"
+      },
+      "water_pump": {
+        "name": "Vandpumpe"
+      }
+    },
+    "number": {
+      "heater_power_limit": {
+        "name": "Varme elektrisk effektgr\u00e6nse"
+      }
+    },
+    "select": {
+      "boiler_mode_ctrl": {
+        "name": "Boilertilstand"
+      },
+      "heater_energy_ctrl": {
+        "name": "Varme energikilde"
+      },
+      "water_heater_mode": {
+        "name": "Varmtvandstilstand"
+      }
+    },
+    "climate": {},
+    "light": {}
+  }
+}

@@ -7,6 +7,7 @@ class based on the slot's datatype + mode.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -38,6 +39,7 @@ from .const import (
     DOMAIN,
     MANUFACTURER,
 )
+from .capability_resolver import main_switch_slots
 from .coordinator import HymerConnectCoordinator
 from .discovery import ComponentMeta, SlotMeta, apply_transform, reverse_transform
 from .preferences import (
@@ -112,6 +114,8 @@ _HUMAN_LABEL_OVERRIDES: dict[str, str] = {
     "ebloutdoor_temp_sensor": "EBL Outdoor Temperature",
     "gps_location": "GPS Location",
     "gps_coordinates": "GPS Coordinates",
+    "heater_diesel_safety": "Heater Diesel Safety",
+    "heater_window_closed": "Heater Diesel Safety",
     "ignition_status": "Ignition Status Code",
     "language_setting": "Language Setting Code",
     "lighting_module_12v_supply": "Lighting Module 12V Supply",
@@ -128,6 +132,7 @@ _HUMAN_LABEL_OVERRIDES: dict[str, str] = {
     "vehicle_brand": "Vehicle Brand Code",
     "vehicle_type": "Vehicle Type Code",
     "vin": "VIN",
+    "window_switch_closed": "Heater Diesel Safety",
 }
 
 _HUMAN_WORD_OVERRIDES: dict[str, str] = {
@@ -549,16 +554,19 @@ class HymerSwitch(_HymerSlotEntity, SwitchEntity):
 
     _attr_device_class = SwitchDeviceClass.SWITCH
 
-    # 12V main switch: bus 3, sid 1.  Use a tuple so per-vehicle overlays
-    # could override this in the future.
-    _MAIN_SWITCH_SLOT: tuple[int, int] = (3, 1)
     _MAIN_SWITCH_OFF_HOLDOFF_S: float = 30.0
+    _MAIN_SWITCH_ON_VERIFY_S: float = 60.0
     _OPTIMISTIC_TTL_S: float = 15.0
 
     def __init__(self, coordinator, entry, meta, component):
         super().__init__(coordinator, entry, meta, component)
         self._optimistic: bool | None = None
         self._optimistic_set_at: float = 0.0
+        self._main_switch_command_at: float = 0.0
+        self._main_switch_command_expected: bool | None = None
+
+    def _is_main_switch(self) -> bool:
+        return (self._bus, self._sid) in main_switch_slots()
 
     def _raw_is_on(self) -> bool | None:
         v = self._value()
@@ -576,7 +584,7 @@ class HymerSwitch(_HymerSlotEntity, SwitchEntity):
         elapsed = time.monotonic() - self._optimistic_set_at
         ttl = self._OPTIMISTIC_TTL_S
         if (
-            (self._bus, self._sid) == self._MAIN_SWITCH_SLOT
+            self._is_main_switch()
             and self._optimistic is False
         ):
             ttl = self._MAIN_SWITCH_OFF_HOLDOFF_S
@@ -601,7 +609,69 @@ class HymerSwitch(_HymerSlotEntity, SwitchEntity):
             return self._optimistic
         return self._raw_is_on()
 
-    async def _send(self, on: bool) -> None:
+    def _track_task(self, task: asyncio.Task) -> None:
+        track = getattr(self.coordinator, "track_background_task", None)
+        if callable(track):
+            track(task)
+
+    def _create_task(self, coro) -> asyncio.Task:
+        hass = getattr(self.coordinator, "hass", None)
+        if hass is not None and hasattr(hass, "async_create_task"):
+            task = hass.async_create_task(coro)
+        else:
+            task = asyncio.create_task(coro)
+        self._track_task(task)
+        return task
+
+    def _schedule_main_switch_verification(self, expected_on: bool) -> None:
+        if not self._is_main_switch():
+            return
+        command_at = self._main_switch_command_at
+        delay = (
+            self._MAIN_SWITCH_ON_VERIFY_S
+            if expected_on
+            else self._MAIN_SWITCH_OFF_HOLDOFF_S
+        )
+        self._create_task(
+            self._verify_main_switch_readback(expected_on, command_at, delay)
+        )
+
+    async def _verify_main_switch_readback(
+        self,
+        expected_on: bool,
+        command_at: float,
+        delay: float,
+    ) -> None:
+        await asyncio.sleep(delay)
+        if (
+            self._main_switch_command_at != command_at
+            or self._main_switch_command_expected is not expected_on
+        ):
+            return
+        actual = self._raw_is_on()
+        if actual is not None and bool(actual) == expected_on:
+            self._optimistic = None
+            self._main_switch_command_expected = None
+            self.async_write_ha_state()
+            return
+        if expected_on is False and self.coordinator.habitation_power_state is False:
+            self._optimistic = None
+            self._main_switch_command_expected = None
+            self.async_write_ha_state()
+            return
+
+        await self.coordinator.async_recover_signalr_command_path(
+            f"12V main switch readback stayed {actual!r} after command to {expected_on}"
+        )
+        try:
+            await self._send(expected_on, verify=False)
+        except Exception:
+            _LOGGER.warning(
+                "12V main switch retry failed after readback mismatch",
+                exc_info=True,
+            )
+
+    async def _send(self, on: bool, *, verify: bool = True) -> None:
         client = await self._ensure_client()
         if self._meta.datatype == "string":
             # Main-switch style: "On"/"Off" strings
@@ -614,6 +684,11 @@ class HymerSwitch(_HymerSlotEntity, SwitchEntity):
             )
         self._optimistic = on
         self._optimistic_set_at = time.monotonic()
+        if self._is_main_switch():
+            self._main_switch_command_at = self._optimistic_set_at
+            self._main_switch_command_expected = on
+            if verify:
+                self._schedule_main_switch_verification(on)
         self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs):
@@ -630,7 +705,7 @@ class HymerSwitch(_HymerSlotEntity, SwitchEntity):
             # during the SCU reconnection bounce.
             if (
                 self._optimistic is False
-                and (self._bus, self._sid) == self._MAIN_SWITCH_SLOT
+                and self._is_main_switch()
             ):
                 v = self._value()
                 v_is_on = (

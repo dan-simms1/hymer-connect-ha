@@ -369,6 +369,13 @@ accepts deeper known metadata slots from real-time cloud frames, but if a sensor
 is only exposed over BLE by a given SCU firmware it will remain stale in Home
 Assistant until a future BLE path is implemented.
 
+The integration also includes recovery logic for 12 V standby transitions. When
+the Smart Unit enters standby after the 12 V main switch is turned off, it
+refreshes the cloud command route without replaying the full subscription burst
+so stale cached state is less likely to overwrite the Home Assistant view. Main
+switch commands also get a delayed readback check; if the Smart Unit still
+reports the old state, the integration reconnects SignalR and retries once.
+
 ## Dashboards
 
 This repository still does **not** ship a fixed ready-made Home Assistant
@@ -467,6 +474,18 @@ The options flow currently supports:
 
 Admin actions are hidden by default. That includes the Smart Unit restart
 button.
+
+## Localisation
+
+Home Assistant uses the language selected in the user's profile. English is the
+primary maintained language for this integration. Initial European translations
+are included for German, Swiss German, French, Spanish, Italian, Dutch, Swedish,
+and Danish. These cover setup, options, Repair text, and the most visible
+vehicle entities; metadata-generated entity names may still fall back to
+English.
+Technical terms such as SCU, SignalR, runtime metadata, and remote-access token
+are intentionally kept close to their original wording where translating them
+would make support or diagnostics less clear.
 
 When debug diagnostics are enabled, the
 `hymer_connect_metadata.export_slot_debug_report` service can write a local

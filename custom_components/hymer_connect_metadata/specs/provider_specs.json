@@ -566,6 +566,14 @@
       "sensor_device_class": "frequency"
     },
     {
+      "key": "lte_connection_quality",
+      "platform": "sensor",
+      "candidates": [
+        {"component_id": 30, "sensor_id": 3}
+      ],
+      "icon": "mdi:signal-cellular-3"
+    },
+    {
       "key": "scu_voltage",
       "platform": "sensor",
       "candidates": [

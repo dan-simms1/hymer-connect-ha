@@ -94,6 +94,7 @@ class RuntimeCatalogTests(unittest.TestCase):
         self.assertEqual(slots["56:15"]["support_class"], "canonical_generic")
         self.assertEqual(slots["99:8"]["support_class"], "canonical_generic")
         self.assertEqual(slots["105:24"]["support_class"], "canonical_generic")
+        self.assertEqual(slots["30:3"]["support_class"], "canonical_generic")
         self.assertEqual(slots["30:4"]["support_class"], "canonical_generic")
         self.assertEqual(slots["30:5"]["support_class"], "canonical_generic")
 

@@ -1,0 +1,174 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connexion HYMER Connect Metadata",
+        "description": "Saisissez les identifiants de votre compte HYMER Connect. Pr\u00e9parez et installez d'abord le pack local de m\u00e9tadonn\u00e9es runtime, puis utilisez la m\u00eame adresse e-mail et le m\u00eame mot de passe que dans l'app HYMER Connect.",
+        "data": {
+          "brand": "Marque",
+          "username": "E-mail",
+          "password": "Mot de passe"
+        }
+      },
+      "select_vehicle": {
+        "title": "S\u00e9lectionner le v\u00e9hicule",
+        "description": "Choisissez le v\u00e9hicule \u00e0 ajouter comme entr\u00e9e Home Assistant distincte. Vous pouvez ajouter maintenant le Remote Access Token extrait de l'app, ou plus tard via Reconfigurer.",
+        "data": {
+          "selected_vehicle": "V\u00e9hicule",
+          "ehg_refresh_token": "EHG Remote Access Refresh Token (facultatif)"
+        },
+        "data_description": {
+          "ehg_refresh_token": "N\u00e9cessaire pour la t\u00e9l\u00e9m\u00e9trie et le contr\u00f4le SignalR en direct. Vous pouvez laisser ce champ vide pour l'instant et ajouter le token plus tard depuis le menu de l'entr\u00e9e de configuration."
+        }
+      },
+      "reauth_confirm": {
+        "title": "[%key:common::config_flow::title::reauth%]",
+        "description": "L'int\u00e9gration HYMER Connect Metadata doit r\u00e9authentifier votre compte.",
+        "data": {
+          "username": "E-mail",
+          "password": "Mot de passe"
+        }
+      },
+      "reconfigure": {
+        "title": "Mettre \u00e0 jour le Remote Access Token",
+        "description": "Mettez \u00e0 jour l'EHG Remote Access Refresh Token extrait de l'app pour ce v\u00e9hicule. Laissez le champ vide pour supprimer le token enregistr\u00e9.",
+        "data": {
+          "ehg_refresh_token": "EHG Remote Access Refresh Token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "\u00c9chec de connexion \u00e0 l'API HYMER Connect",
+      "invalid_auth": "E-mail ou mot de passe invalide",
+      "missing_runtime_metadata": "Pr\u00e9parez et installez le pack local de m\u00e9tadonn\u00e9es runtime avant de vous connecter",
+      "invalid_remote_access_token": "Le Remote Access Token n'a pas pu \u00eatre valid\u00e9 pour ce v\u00e9hicule",
+      "no_vehicles": "Aucun v\u00e9hicule trouv\u00e9 pour ce compte",
+      "vehicle_not_found": "Le v\u00e9hicule configur\u00e9 est introuvable dans ce compte",
+      "wrong_account": "Les nouveaux identifiants n'ont pas acc\u00e8s au v\u00e9hicule configur\u00e9",
+      "unknown": "Erreur inattendue"
+    },
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+      "reconfigure_successful": "Reconfiguration r\u00e9ussie"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options d'affichage et de d\u00e9bogage",
+        "description": "Configurez les entit\u00e9s de d\u00e9bogage facultatives et les unit\u00e9s d'affichage pour cette entr\u00e9e de v\u00e9hicule.",
+        "data": {
+          "show_admin_actions": "Afficher les actions administrateur",
+          "show_debug_diagnostics": "Afficher les diagnostics de d\u00e9bogage",
+          "use_miles": "Afficher les distances en miles",
+          "use_fahrenheit": "Afficher les temp\u00e9ratures en Fahrenheit"
+        }
+      }
+    }
+  },
+  "issues": {
+    "missing_runtime_metadata": {
+      "title": "Les m\u00e9tadonn\u00e9es runtime HYMER locales sont manquantes",
+      "description": "HYMER Connect Metadata ne peut pas terminer la configuration car le pack local de m\u00e9tadonn\u00e9es runtime est manquant.\n\nFichiers manquants : {missing_files}\n\nDepuis un checkout complet de ce d\u00e9p\u00f4t sur n'importe quelle machine, pr\u00e9parez le pack de m\u00e9tadonn\u00e9es avec :\n```\n{prepare_command}\n```\n\nSi l'APK contient un bundle Hermes bytecode, relancez la commande avec `--bundle-js` ou `--bundle-js-url`. Extrayez ensuite le fichier zip g\u00e9n\u00e9r\u00e9 dans `custom_components/hymer_connect_metadata/data/` dans le r\u00e9pertoire de configuration Home Assistant et rechargez l'int\u00e9gration."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_soc": {
+        "name": "\u00c9tat de charge batterie cellule"
+      },
+      "distance_to_service": {
+        "name": "Distance avant entretien"
+      },
+      "fuel_level": {
+        "name": "Niveau de carburant"
+      },
+      "fresh_water_level": {
+        "name": "Niveau d'eau propre"
+      },
+      "grey_cartridge_level": {
+        "name": "Niveau cassette eaux grises"
+      },
+      "lte_connection_quality": {
+        "name": "Qualit\u00e9 du signal LTE"
+      },
+      "lte_connection_state": {
+        "name": "\u00c9tat de connexion LTE"
+      },
+      "odometer": {
+        "name": "Odom\u00e8tre"
+      },
+      "outside_temperature": {
+        "name": "Temp\u00e9rature ext\u00e9rieure"
+      },
+      "scu_voltage": {
+        "name": "Tension SCU"
+      },
+      "vehicle_model": {
+        "name": "Mod\u00e8le"
+      },
+      "vehicle_model_year": {
+        "name": "Ann\u00e9e mod\u00e8le"
+      },
+      "vehicle_vin": {
+        "name": "VIN"
+      },
+      "waste_water_level": {
+        "name": "Niveau eaux grises"
+      }
+    },
+    "binary_sensor": {
+      "battery_cutoff_switch": {
+        "name": "Coupe-circuit batterie cellule"
+      },
+      "fridge_door_open": {
+        "name": "Porte du r\u00e9frig\u00e9rateur ouverte"
+      },
+      "heater_window_closed": {
+        "name": "S\u00e9curit\u00e9 diesel chauffage"
+      },
+      "lte_connection_state": {
+        "name": "\u00c9tat de connexion LTE"
+      },
+      "scu_shoreline_connected": {
+        "name": "Alimentation secteur SCU connect\u00e9e"
+      },
+      "vehicle_movement": {
+        "name": "Mouvement du v\u00e9hicule"
+      }
+    },
+    "switch": {
+      "fridge_eco": {
+        "name": "R\u00e9frig\u00e9rateur Eco"
+      },
+      "main_switch": {
+        "name": "Interrupteur 12 V"
+      },
+      "night_mode": {
+        "name": "Mode silencieux"
+      },
+      "water_pump": {
+        "name": "Pompe \u00e0 eau"
+      }
+    },
+    "number": {
+      "heater_power_limit": {
+        "name": "Limite de puissance \u00e9lectrique chauffage"
+      }
+    },
+    "select": {
+      "boiler_mode_ctrl": {
+        "name": "Mode boiler"
+      },
+      "heater_energy_ctrl": {
+        "name": "\u00c9nergie du chauffage"
+      },
+      "water_heater_mode": {
+        "name": "Mode eau chaude"
+      }
+    },
+    "climate": {},
+    "light": {}
+  }
+}

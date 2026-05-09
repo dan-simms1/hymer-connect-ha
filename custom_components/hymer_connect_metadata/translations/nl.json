@@ -1,0 +1,174 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Aanmelden bij HYMER Connect Metadata",
+        "description": "Voer de gegevens van je HYMER Connect-account in. Maak en installeer eerst het lokale runtime-metadatapakket en gebruik daarna hetzelfde e-mailadres en wachtwoord als in de HYMER Connect-app.",
+        "data": {
+          "brand": "Merk",
+          "username": "E-mail",
+          "password": "Wachtwoord"
+        }
+      },
+      "select_vehicle": {
+        "title": "Voertuig selecteren",
+        "description": "Kies welk voertuig als aparte Home Assistant-vermelding wordt toegevoegd. Je kunt de uit de app gehaalde Remote Access Token nu toevoegen of later via Opnieuw configureren.",
+        "data": {
+          "selected_vehicle": "Voertuig",
+          "ehg_refresh_token": "EHG Remote Access Refresh Token (optioneel)"
+        },
+        "data_description": {
+          "ehg_refresh_token": "Nodig voor live SignalR-telemetrie en bediening. Je kunt dit voorlopig leeg laten en de token later toevoegen via het menu van de configuratievermelding."
+        }
+      },
+      "reauth_confirm": {
+        "title": "[%key:common::config_flow::title::reauth%]",
+        "description": "De HYMER Connect Metadata-integratie moet je account opnieuw verifi\u00ebren.",
+        "data": {
+          "username": "E-mail",
+          "password": "Wachtwoord"
+        }
+      },
+      "reconfigure": {
+        "title": "Remote Access Token bijwerken",
+        "description": "Werk de uit de app gehaalde EHG Remote Access Refresh Token voor dit voertuig bij. Laat dit leeg om de opgeslagen token te verwijderen.",
+        "data": {
+          "ehg_refresh_token": "EHG Remote Access Refresh Token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbinden met de HYMER Connect API is mislukt",
+      "invalid_auth": "Ongeldig e-mailadres of wachtwoord",
+      "missing_runtime_metadata": "Maak en installeer het lokale runtime-metadatapakket voordat je aanmeldt",
+      "invalid_remote_access_token": "De Remote Access Token kon niet voor dit voertuig worden gevalideerd",
+      "no_vehicles": "Geen voertuigen gevonden voor dit account",
+      "vehicle_not_found": "Het geconfigureerde voertuig kon niet uit dit account worden opgehaald",
+      "wrong_account": "De nieuwe aanmeldgegevens hebben geen toegang tot het geconfigureerde voertuig",
+      "unknown": "Onverwachte fout opgetreden"
+    },
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+      "reconfigure_successful": "Opnieuw configureren is gelukt"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Weergave- en debugopties",
+        "description": "Configureer optionele debug-entiteiten en weergave-eenheden voor deze voertuigvermelding.",
+        "data": {
+          "show_admin_actions": "Adminacties tonen",
+          "show_debug_diagnostics": "Debugdiagnostiek tonen",
+          "use_miles": "Afstanden in mijlen tonen",
+          "use_fahrenheit": "Temperaturen in Fahrenheit tonen"
+        }
+      }
+    }
+  },
+  "issues": {
+    "missing_runtime_metadata": {
+      "title": "Lokale HYMER-runtime-metadata ontbreekt",
+      "description": "HYMER Connect Metadata kan de installatie niet voltooien omdat het lokale runtime-metadatapakket ontbreekt.\n\nOntbrekende bestanden: {missing_files}\n\nMaak vanuit een volledige checkout van deze repository op een willekeurige machine het metadatapakket met:\n```\n{prepare_command}\n```\n\nAls de APK een Hermes-bytecodebundle bevat, voer de opdracht opnieuw uit met `--bundle-js` of `--bundle-js-url`. Pak daarna het gegenereerde zipbestand uit naar `custom_components/hymer_connect_metadata/data/` in de Home Assistant-configuratiemap en herlaad de integratie."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_soc": {
+        "name": "Laadstatus woonaccu"
+      },
+      "distance_to_service": {
+        "name": "Afstand tot onderhoud"
+      },
+      "fuel_level": {
+        "name": "Brandstofniveau"
+      },
+      "fresh_water_level": {
+        "name": "Schoonwaterniveau"
+      },
+      "grey_cartridge_level": {
+        "name": "Grijswatercassette niveau"
+      },
+      "lte_connection_quality": {
+        "name": "LTE-signaalkwaliteit"
+      },
+      "lte_connection_state": {
+        "name": "LTE-verbindingsstatus"
+      },
+      "odometer": {
+        "name": "Kilometerstand"
+      },
+      "outside_temperature": {
+        "name": "Buitentemperatuur"
+      },
+      "scu_voltage": {
+        "name": "SCU-spanning"
+      },
+      "vehicle_model": {
+        "name": "Model"
+      },
+      "vehicle_model_year": {
+        "name": "Modeljaar"
+      },
+      "vehicle_vin": {
+        "name": "VIN"
+      },
+      "waste_water_level": {
+        "name": "Grijswaterniveau"
+      }
+    },
+    "binary_sensor": {
+      "battery_cutoff_switch": {
+        "name": "Woonaccu-scheidingsschakelaar"
+      },
+      "fridge_door_open": {
+        "name": "Koelkastdeur open"
+      },
+      "heater_window_closed": {
+        "name": "Dieselbeveiliging verwarming"
+      },
+      "lte_connection_state": {
+        "name": "LTE-verbindingsstatus"
+      },
+      "scu_shoreline_connected": {
+        "name": "SCU walstroom aangesloten"
+      },
+      "vehicle_movement": {
+        "name": "Voertuigbeweging"
+      }
+    },
+    "switch": {
+      "fridge_eco": {
+        "name": "Koelkast Eco"
+      },
+      "main_switch": {
+        "name": "12 V-schakelaar"
+      },
+      "night_mode": {
+        "name": "Stille modus"
+      },
+      "water_pump": {
+        "name": "Waterpomp"
+      }
+    },
+    "number": {
+      "heater_power_limit": {
+        "name": "Elektrische vermogenslimiet verwarming"
+      }
+    },
+    "select": {
+      "boiler_mode_ctrl": {
+        "name": "Boilermodus"
+      },
+      "heater_energy_ctrl": {
+        "name": "Energiebron verwarming"
+      },
+      "water_heater_mode": {
+        "name": "Warmwatermodus"
+      }
+    },
+    "climate": {},
+    "light": {}
+  }
+}
