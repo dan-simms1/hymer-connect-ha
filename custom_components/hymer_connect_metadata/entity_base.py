@@ -564,6 +564,7 @@ class HymerSwitch(_HymerSlotEntity, SwitchEntity):
         self._optimistic_set_at: float = 0.0
         self._main_switch_command_at: float = 0.0
         self._main_switch_command_expected: bool | None = None
+        self._retry_count: int = 0  # caps the re-auth+retry loop
 
     def _is_main_switch(self) -> bool:
         return (self._bus, self._sid) in main_switch_slots()
@@ -660,11 +661,27 @@ class HymerSwitch(_HymerSlotEntity, SwitchEntity):
             self.async_write_ha_state()
             return
 
-        await self.coordinator.async_recover_signalr_command_path(
-            f"12V main switch readback stayed {actual!r} after command to {expected_on}"
-        )
+        self._retry_count += 1
+        if self._retry_count > 1:
+            _LOGGER.warning(
+                "12V main switch still mismatched (%r) after %d re-auth+retry "
+                "attempts — giving up (reload integration to recover)",
+                actual,
+                self._retry_count,
+            )
+            self._optimistic = None
+            self._main_switch_command_expected = None
+            self._retry_count = 0
+            self.async_write_ha_state()
+            return
+
+        # A plain reconnect reuses the stale OAuth2 session and can leave the
+        # hub->SCU command channel dead.  Force a full re-auth so the retried
+        # command actually reaches the SCU.  Keep verify=True so a second
+        # mismatch trips the retry cap above instead of looping forever.
+        await self.coordinator.force_reauth_and_reconnect()
         try:
-            await self._send(expected_on, verify=False)
+            await self._send(expected_on, verify=True)
         except Exception:
             _LOGGER.warning(
                 "12V main switch retry failed after readback mismatch",
@@ -692,9 +709,11 @@ class HymerSwitch(_HymerSlotEntity, SwitchEntity):
         self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs):
+        self._retry_count = 0  # reset cap on a new user-initiated command
         await self._send(True)
 
     async def async_turn_off(self, **kwargs):
+        self._retry_count = 0  # reset cap on a new user-initiated command
         await self._send(False)
 
     def _handle_coordinator_update(self) -> None:

@@ -6,5 +6,6 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `1.0.20` — adds HACS/Hassfest validation workflows and declares dashboard
-  dependencies required by Hassfest
+- `1.0.21` — ports the upstream cloud command-reliability fixes: full OAuth2
+  re-auth on a dead command channel, proactive re-auth before commands during
+  extended 12V standby, and a capped switch retry loop.

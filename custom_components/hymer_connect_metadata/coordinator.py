@@ -21,7 +21,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import HymerConnectApi, HymerConnectApiError, HymerConnectAuthError
 from .capability_resolver import main_switch_slots
-from homeassistant.const import CONF_USERNAME
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 
 from .const import (
     CONF_VEHICLE_ID,
@@ -36,7 +36,7 @@ from .const import (
     DOMAIN,
 )
 from .discovery import all_slots
-from .signalr_client import HymerSignalRClient
+from .signalr_client import EXTENDED_STANDBY_THRESHOLD, HymerSignalRClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -396,10 +396,74 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._pending_setup_slots.clear()
             self._schedule_capability_reload(pending)
 
+    async def force_reauth_and_reconnect(self) -> None:
+        """Force a full OAuth2 re-authentication, then reconnect SignalR.
+
+        A plain SignalR reconnect (negotiate only) reuses the existing
+        OAuth2 session, which can look healthy while the server-side
+        hub->SCU command routing is stale — commands then get silently
+        dropped.  A fresh password-grant authentication, mirroring an
+        integration reload, resets that routing.  Falls back to a token
+        refresh when stored credentials are unavailable.
+        """
+        _LOGGER.info(
+            "Forcing full OAuth2 re-authentication for %s before SignalR reconnect",
+            self.config_entry.title,
+        )
+        await self.stop_signalr()
+        try:
+            username = self.config_entry.data.get(CONF_USERNAME, "")
+            password = self.config_entry.data.get(CONF_PASSWORD, "")
+            if username and password:
+                await self.api.authenticate(username, password)
+                _LOGGER.info(
+                    "OAuth2 re-authentication successful for %s",
+                    self.config_entry.title,
+                )
+            else:
+                await self.api._refresh_access_token()
+                _LOGGER.info(
+                    "OAuth2 token refresh successful for %s (no stored credentials)",
+                    self.config_entry.title,
+                )
+        except Exception:
+            _LOGGER.warning(
+                "OAuth2 re-authentication failed for %s",
+                self.config_entry.title,
+                exc_info=True,
+            )
+        # Re-enable connection-lost handling and reset backoff for a clean start.
+        self._shutting_down = False
+        self._suppress_connection_lost_refresh = False
+        self._last_reconnect_attempt = 0.0
+        self._reconnect_backoff = _INITIAL_BACKOFF
+        await self.start_signalr()
+
     async def async_ensure_signalr_healthy(self) -> HymerSignalRClient:
         """Return a healthy SignalR client, reconnecting if needed."""
         client = self._signalr
         if client and client.connected:
+            # Proactive extended-standby recovery: after a long 12V standby
+            # the server-side hub->SCU routing goes stale and commands are
+            # silently dropped, even though this connection still looks
+            # healthy.  Force a full re-auth + reconnect before sending
+            # rather than waiting for the 60s command-readback timeout.
+            if client.scu_standby_seconds > EXTENDED_STANDBY_THRESHOLD:
+                _LOGGER.info(
+                    "SCU in extended standby (%.0fs > %ds) for %s — forcing "
+                    "full re-auth + reconnect before command",
+                    client.scu_standby_seconds,
+                    int(EXTENDED_STANDBY_THRESHOLD),
+                    self.config_entry.title,
+                )
+                await self.force_reauth_and_reconnect()
+                client = self._signalr
+                if client and client.connected:
+                    return client
+                raise HomeAssistantError(
+                    "SignalR reconnect after extended standby failed. "
+                    "Try reloading the integration."
+                )
             return client
         _LOGGER.info(
             "SignalR not ready for %s — attempting reconnect before command",
@@ -451,21 +515,6 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         raise HomeAssistantError(
             "Command failed after reconnect and retry. Try reloading the integration."
         )
-
-    async def async_recover_signalr_command_path(self, reason: str) -> None:
-        """Force the SignalR command path through the fast reconnect route."""
-        _LOGGER.warning(
-            "%s for %s — forcing SignalR reconnect",
-            reason,
-            self.config_entry.title,
-        )
-        client = self._signalr
-        if client is not None:
-            client.mark_disconnected()
-        self._last_reconnect_attempt = 0.0
-        self._reconnect_backoff = _INITIAL_BACKOFF
-        self._on_signalr_connection_lost()
-        await asyncio.sleep(0)
 
     async def async_send_light_command(
         self,

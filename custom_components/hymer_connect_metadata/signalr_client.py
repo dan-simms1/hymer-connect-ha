@@ -45,6 +45,12 @@ PIA_REQUEST_TIMEOUT = 30.0
 STANDBY_WAKE_UPDATE_TOKENS_DELAY = 3.0
 STANDBY_WAKE_RESUBSCRIBE_DELAY = 0.75
 
+# After this long in 12V standby the server-side hub->SCU command routing
+# goes stale: outbound commands are silently dropped even though the
+# WebSocket and subscription stream still look healthy.  Commands sent
+# after this threshold need a full OAuth2 re-auth + reconnect first.
+EXTENDED_STANDBY_THRESHOLD = 600.0
+
 
 def _is_closed_transport_error(err: RuntimeError) -> bool:
     """Return True when aiohttp/httpx reports a closed client/session."""
@@ -97,6 +103,7 @@ class HymerSignalRClient:
         self._signalr_token: str = ""
         self._connected_at: float = 0.0  # monotonic timestamp of connection
         self._last_data_received: float = 0.0  # monotonic timestamp of last data
+        self._scu_standby_since: float = 0.0  # monotonic ts of standby entry
         self._connection_lost_notified = False
         self._completion_futures: dict[str, asyncio.Future[bool]] = {}
         self._next_invocation_id = 0
@@ -113,6 +120,13 @@ class HymerSignalRClient:
         if not self._connected or not self._ws or self._ws.closed:
             return False
         return True
+
+    @property
+    def scu_standby_seconds(self) -> float:
+        """Return how long the SCU has been in 12V standby (0 if awake)."""
+        if self._scu_standby_since <= 0:
+            return 0.0
+        return time.monotonic() - self._scu_standby_since
 
     @staticmethod
     def _is_standby_value(value: Any) -> bool:
@@ -615,8 +629,10 @@ class HymerSignalRClient:
                     list(slot_data.keys())[:20],
                 )
                 if was_standby and not is_standby:
+                    self._scu_standby_since = 0.0
                     self._schedule_standby_wake_refresh()
                 elif not was_standby and is_standby:
+                    self._scu_standby_since = time.monotonic()
                     self._schedule_standby_entry_refresh()
                 if self._on_sensor_update:
                     self._on_sensor_update(slot_data)

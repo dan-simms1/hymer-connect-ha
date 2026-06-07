@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.21] - 2026-06-07
+
+### Fixed
+
+- **Commands silently dropped after a stale OAuth2 session or extended 12V
+  standby** — Ported from the upstream cloud reliability work
+  (`BetaHydri/hymer-connect-ha` v2.55.4 / v2.56.1). When the OAuth2 session
+  degrades over time, or the SCU has sat in 12V standby for more than 10
+  minutes, the server-side hub→SCU command routing goes stale: a plain SignalR
+  reconnect (negotiate only) reuses the stale session and produces a connection
+  that looks healthy but cannot deliver commands. The coordinator now performs
+  a full OAuth2 re-authentication (password grant, mirroring an integration
+  reload) before reconnecting SignalR:
+  - `force_reauth_and_reconnect()` re-authenticates, then rebuilds the SignalR
+    connection with a clean session.
+  - `async_ensure_signalr_healthy()` proactively detects extended standby
+    (`scu_standby_seconds > 10 min`) and forces the full re-auth + reconnect
+    *before* sending the command, instead of waiting for the 60s readback
+    timeout.
+  - The 12V main-switch readback path now escalates to a full re-auth on a
+    mismatch and is capped at a single retry, so a truly dead command channel
+    no longer loops endlessly — it clears optimistic state and logs a warning.
+
 ## [1.0.20] - 2026-05-09
 
 ### Changed

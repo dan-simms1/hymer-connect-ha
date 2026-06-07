@@ -521,6 +521,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
             def __init__(self, ok: bool) -> None:
                 self._connected = True
                 self.needs_reconnect = False
+                self.scu_standby_seconds = 0.0
                 self.ok = ok
                 self.calls = 0
 
@@ -555,6 +556,87 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         self.assertEqual(first.calls, 1)
         self.assertEqual(second.calls, 1)
+
+    def test_extended_standby_forces_reauth_before_command(self) -> None:
+        install_homeassistant_stubs()
+        import sys
+
+        sys.modules.pop("custom_components.hymer_connect_metadata.coordinator", None)
+        ensure_package_paths()
+        coordinator_mod = importlib.import_module("custom_components.hymer_connect_metadata.coordinator")
+        cls = coordinator_mod.HymerConnectCoordinator
+        threshold = coordinator_mod.EXTENDED_STANDBY_THRESHOLD
+
+        class Client:
+            def __init__(self, standby: float) -> None:
+                self._connected = True
+                self.needs_reconnect = False
+                self.scu_standby_seconds = standby
+
+            @property
+            def connected(self) -> bool:
+                return self._connected
+
+        stale = Client(threshold + 1)
+        fresh = Client(0.0)
+        coordinator = cls.__new__(cls)
+        coordinator._signalr = stale
+        coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
+
+        reauths: list[int] = []
+
+        async def force_reauth_and_reconnect() -> None:
+            reauths.append(1)
+            coordinator._signalr = fresh
+
+        coordinator.force_reauth_and_reconnect = force_reauth_and_reconnect
+
+        import asyncio
+
+        result = asyncio.run(coordinator.async_ensure_signalr_healthy())
+
+        # Extended standby triggers exactly one full re-auth and returns the
+        # freshly reconnected client.
+        self.assertEqual(reauths, [1])
+        self.assertIs(result, fresh)
+
+    def test_short_standby_skips_reauth(self) -> None:
+        install_homeassistant_stubs()
+        import sys
+
+        sys.modules.pop("custom_components.hymer_connect_metadata.coordinator", None)
+        ensure_package_paths()
+        coordinator_mod = importlib.import_module("custom_components.hymer_connect_metadata.coordinator")
+        cls = coordinator_mod.HymerConnectCoordinator
+
+        class Client:
+            _connected = True
+            needs_reconnect = False
+            scu_standby_seconds = 0.0
+
+            @property
+            def connected(self) -> bool:
+                return self._connected
+
+        client = Client()
+        coordinator = cls.__new__(cls)
+        coordinator._signalr = client
+        coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
+
+        reauths: list[int] = []
+
+        async def force_reauth_and_reconnect() -> None:
+            reauths.append(1)
+
+        coordinator.force_reauth_and_reconnect = force_reauth_and_reconnect
+
+        import asyncio
+
+        result = asyncio.run(coordinator.async_ensure_signalr_healthy())
+
+        # A healthy, non-standby client is returned untouched.
+        self.assertEqual(reauths, [])
+        self.assertIs(result, client)
 
     def test_signalr_connection_lost_is_ignored_when_refresh_is_suppressed(self) -> None:
         install_homeassistant_stubs()
@@ -967,6 +1049,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
                     known_slots={(3, 1)},
                 )
                 client._slot_data[(3, 1)] = "Off"
+                client._scu_standby_since = 100.0
                 scheduled: list[str] = []
 
                 async def fake_wake_refresh() -> None:
@@ -984,6 +1067,10 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
                 self.assertEqual(client._slot_data[(3, 1)], "On")
                 self.assertEqual(scheduled, ["refresh"])
+                # Waking clears the standby clock so we don't keep forcing
+                # re-auth once the SCU is back online.
+                self.assertEqual(client._scu_standby_since, 0.0)
+                self.assertEqual(client.scu_standby_seconds, 0.0)
 
             asyncio.run(run_test())
         finally:
@@ -1039,6 +1126,10 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
                 self.assertEqual(client._slot_data[(3, 1)], "Off")
                 self.assertEqual(scheduled, ["entry"])
+                # Standby entry stamps the clock so extended-standby recovery
+                # can later detect a stale command channel.
+                self.assertGreater(client._scu_standby_since, 0.0)
+                self.assertGreater(client.scu_standby_seconds, 0.0)
 
             asyncio.run(run_test())
         finally:
@@ -1237,7 +1328,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
         self.assertFalse(switch.is_on)
         self.assertIsNone(switch._optimistic)
 
-    def test_main_switch_readback_mismatch_forces_reconnect_and_one_retry(self) -> None:
+    def test_main_switch_readback_mismatch_forces_reauth_and_one_retry(self) -> None:
         install_homeassistant_stubs()
         entity_base = importlib.import_module("custom_components.hymer_connect_metadata.entity_base")
         cls = entity_base.HymerSwitch
@@ -1246,10 +1337,10 @@ class GeneratorAndEntityTests(unittest.TestCase):
             habitation_power_state = True
 
             def __init__(self) -> None:
-                self.recoveries: list[str] = []
+                self.reauths: int = 0
 
-            async def async_recover_signalr_command_path(self, reason: str) -> None:
-                self.recoveries.append(reason)
+            async def force_reauth_and_reconnect(self) -> None:
+                self.reauths += 1
 
         async def run_test() -> None:
             coordinator = Coordinator()
@@ -1258,6 +1349,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
             switch._main_switch_command_at = 42.0
             switch._main_switch_command_expected = False
             switch._optimistic = False
+            switch._retry_count = 0
             switch._raw_is_on = lambda: True
             switch.async_write_ha_state = lambda: None
             retries: list[tuple[bool, bool]] = []
@@ -1266,10 +1358,19 @@ class GeneratorAndEntityTests(unittest.TestCase):
                 retries.append((on, verify))
 
             switch._send = fake_send
-            await switch._verify_main_switch_readback(False, 42.0, 0)
 
-            self.assertEqual(len(coordinator.recoveries), 1)
-            self.assertEqual(retries, [(False, False)])
+            # First mismatch: full re-auth + one verified retry.
+            await switch._verify_main_switch_readback(False, 42.0, 0)
+            self.assertEqual(coordinator.reauths, 1)
+            self.assertEqual(retries, [(False, True)])
+            self.assertEqual(switch._retry_count, 1)
+
+            # Second mismatch: retry cap reached, give up without re-auth.
+            await switch._verify_main_switch_readback(False, 42.0, 0)
+            self.assertEqual(coordinator.reauths, 1)
+            self.assertEqual(retries, [(False, True)])
+            self.assertIsNone(switch._optimistic)
+            self.assertEqual(switch._retry_count, 0)
 
         asyncio.run(run_test())
 
