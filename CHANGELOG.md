@@ -6,6 +6,6 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `1.0.21` — ports the upstream cloud command-reliability fixes: full OAuth2
-  re-auth on a dead command channel, proactive re-auth before commands during
-  extended 12V standby, and a capped switch retry loop.
+- `1.0.22` — ports two further upstream cloud fixes: a SignalR rapid-reconnect
+  cooldown (avoids Azure dropping reconnects after a short-lived session) and
+  the `device_tracker` TrackerEntity import deprecation fix.

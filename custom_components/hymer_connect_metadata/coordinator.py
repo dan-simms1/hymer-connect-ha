@@ -45,6 +45,12 @@ _LOGGER = logging.getLogger(__name__)
 _INITIAL_BACKOFF = 1
 _MAX_BACKOFF = 16
 _MAX_CONSECUTIVE_FAILURES = 5
+# Azure SignalR drops a new connection that arrives before it has cleaned up a
+# just-closed session server-side, showing up as repeating rapid drops.  When
+# the previous session was shorter than this threshold, wait the cooldown before
+# the first reconnect attempt; long-lived sessions still reconnect fast.
+_RAPID_DROP_THRESHOLD = 30  # seconds — a session shorter than this is a rapid drop
+_RAPID_DROP_COOLDOWN = 5  # seconds to wait before reconnecting after a rapid drop
 _REST_METADATA_INTERVAL = 600  # 10 minutes between full REST metadata refreshes
 _CAPABILITY_RELOAD_DEBOUNCE_S = 5
 _ACTIVE_SLOT_WINDOW_S = 30 * 60  # 30 min — recent enough to count as currently active
@@ -110,6 +116,7 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._slot_last_seen: dict[tuple[int, int], float] = {}
         self._reconnect_backoff: int = _INITIAL_BACKOFF
         self._last_reconnect_attempt: float = 0.0
+        self._signalr_connected_at: float = 0.0  # monotonic ts of last successful connect
         self._consecutive_failures: int = 0
         self._last_rest_metadata_refresh: float = 0.0
         self._cached_rest_data: dict[str, Any] = {}
@@ -636,10 +643,25 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.config_entry.title,
             )
             return
-        _LOGGER.info("SignalR connection lost — starting reconnect loop")
+        session_duration = (
+            time.monotonic() - self._signalr_connected_at
+            if self._signalr_connected_at
+            else 0.0
+        )
+        if 0 < session_duration < _RAPID_DROP_THRESHOLD:
+            initial_delay = max(_INITIAL_BACKOFF, _RAPID_DROP_COOLDOWN)
+            _LOGGER.info(
+                "SignalR dropped after %.1fs — cooling down %ds before reconnect so "
+                "Azure can release the old session",
+                session_duration,
+                initial_delay,
+            )
+        else:
+            initial_delay = _INITIAL_BACKOFF
+            _LOGGER.info("SignalR connection lost — starting reconnect loop")
 
         async def _reconnect_loop() -> None:
-            delay = _INITIAL_BACKOFF
+            delay = initial_delay
             attempts = 0
             while attempts < _MAX_CONSECUTIVE_FAILURES and not self._suppress_connection_lost_refresh:
                 attempts += 1
@@ -715,6 +737,7 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Reset backoff/failure state on successful connection.
                 self._reconnect_backoff = _INITIAL_BACKOFF
                 self._consecutive_failures = 0
+                self._signalr_connected_at = time.monotonic()
             except HymerConnectApiError as err:
                 self._consecutive_failures += 1
                 _LOGGER.warning(

@@ -202,11 +202,15 @@ def install_homeassistant_stubs() -> None:
 
     device_tracker = module("homeassistant.components.device_tracker")
     device_tracker.SourceType = types.SimpleNamespace(GPS="gps")
+    # Real HA exports TrackerEntity from both the package and the (deprecated)
+    # config_entry submodule; mirror that so either import path works in tests.
+    tracker_entity = type("TrackerEntity", (), {})
+    device_tracker.TrackerEntity = tracker_entity
 
     device_tracker_config_entry = module(
         "homeassistant.components.device_tracker.config_entry"
     )
-    device_tracker_config_entry.TrackerEntity = type("TrackerEntity", (), {})
+    device_tracker_config_entry.TrackerEntity = tracker_entity
 
     scene = module("homeassistant.components.scene")
     scene.Scene = type("Scene", (), {})

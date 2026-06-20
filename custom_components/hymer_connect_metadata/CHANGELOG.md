@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.22] - 2026-06-20
+
+### Fixed
+
+- **SignalR rapid-reconnect storms** — Ported from upstream
+  (`BetaHydri/hymer-connect-ha-ble` v2.63.11). Azure SignalR silently drops a
+  new connection that arrives before it has released a just-closed session
+  server-side, which shows up as repeating rapid drops. When the previous
+  session lasted less than 30s, the reconnect loop now waits a short cooldown
+  (5s) before its first attempt so the service can clean up; long-lived
+  sessions still reconnect immediately.
+- **`device_tracker` forward compatibility** — Import `TrackerEntity` from
+  `homeassistant.components.device_tracker` instead of the deprecated
+  `.config_entry` submodule, which Home Assistant Core removes in 2027.6.
+
 ## [1.0.21] - 2026-06-07
 
 ### Fixed
