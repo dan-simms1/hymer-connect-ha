@@ -4,6 +4,8 @@ This repository builds on earlier HYMER Connect reverse-engineering and Home
 Assistant integration work by **Jan Tiedemann / BetaHydri**:
 
 - `https://github.com/BetaHydri/hymer-connect-ha`
+- `https://github.com/BetaHydri/hymer-connect-ha-ble` (its successor; the
+  original repository was deprecated in favour of this one in May 2026)
 
 The current codebase has been substantially reworked around a metadata-driven,
 vehicle-scoped discovery architecture, but parts of the implementation still
@@ -18,10 +20,15 @@ publish a separate open-source license file and public-release permission for
 this derivative work had not yet been confirmed.
 
 Jan Tiedemann / BetaHydri has since confirmed that he is happy for this
-derivative repository to be published.
+derivative repository to be published, and the upstream project now publishes
+an MIT License (Copyright (c) 2024-2026 BetaHydri).
 
-This file is intended to make provenance clear. It does not claim that
-attribution alone replaces clear licensing terms for upstream-derived code.
+This repository is therefore distributed under the MIT License as well; see
+`LICENSE` at the repository root, which retains the upstream copyright notice
+alongside this project's own.
+
+This file remains here to make provenance clear at the file level. It does not
+replace the licensing terms in `LICENSE`.
 
 ## Upstream Project Credit
 

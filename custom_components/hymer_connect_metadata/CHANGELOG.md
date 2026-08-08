@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.23] - 2026-08-08
+
+### Added
+
+- **MIT License** — The repository now carries a `LICENSE` file at its root,
+  retaining the upstream copyright notice
+  (`Copyright (c) 2024-2026 BetaHydri`) alongside this project's own. The
+  upstream project publishes MIT, so this derivative does the same. This was
+  the sole blocker on the HACS default-catalog submission
+  ([hacs/default#7526](https://github.com/hacs/default/pull/7526)).
+
+### Changed
+
+- `ATTRIBUTION.md` now records that upstream publishes an MIT License and
+  points at `LICENSE` for terms, rather than stating that no upstream license
+  file exists. It also notes that the original repository was deprecated in
+  May 2026 in favour of `BetaHydri/hymer-connect-ha-ble`.
+
 ## [1.0.22] - 2026-06-20
 
 ### Fixed

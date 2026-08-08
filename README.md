@@ -530,3 +530,9 @@ upstream integration remains the default recommendation.
 This is an unofficial community project. It is not affiliated with, endorsed
 by, or supported by HYMER, Erwin Hymer Group, or the authors of the official
 mobile app.
+
+## License
+
+Released under the [MIT License](LICENSE), matching the upstream project this
+work derives from. See [ATTRIBUTION.md](ATTRIBUTION.md) for the file-level
+provenance breakdown.
