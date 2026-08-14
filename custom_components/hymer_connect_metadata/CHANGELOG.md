@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.24] - 2026-08-14
+
+### Fixed
+
+- **Fuel level reported 0% for a full tank** — `fuel_level` carried an
+  `invert100` transform on both `(1, 2)` and `(108, 2)`, so the runtime
+  computed `100 - raw`. A full tank reports raw `100`, which came out as `0%`.
+
+  The transform was never correct. The decompiled component registry names
+  the slot `FuelTankLevel` — a fill level — with `LowFuelWarning` as a
+  separate boolean on component 108, so there is no "how empty" semantic to
+  invert. Upstream applies no transform to this slot while using
+  `div1000`/`div10`/`div3600` on neighbouring slots of the same component,
+  so its absence there is deliberate rather than an oversight.
+
+  Verified on a live install: the sensor moved from `0.0` to `100.0` against
+  a full tank once the transform was removed.
+
+  > **Existing installs need action.** These hints are not read at runtime —
+  > the registry generator extracts them into `data/sensor_labels.json`, which
+  > is what the integration loads. Either regenerate the metadata pack, or
+  > remove `"transform": "invert100"` from the `"1:2"` and `"108:2"` entries
+  > of your installed `data/sensor_labels.json` and restart Home Assistant.
+
 ## [1.0.23] - 2026-08-08
 
 ### Added
