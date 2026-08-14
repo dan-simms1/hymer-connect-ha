@@ -19,6 +19,7 @@ from .api import HymerConnectApi, HymerConnectApiError
 from .capability_resolver import main_switch_slots
 from .const import USER_AGENT
 from .pia_decoder import (
+    build_refresh_command,
     build_restart_system_request,
     decode_pia_slots,
     decode_pia_slots_bytes,
@@ -44,6 +45,12 @@ MSG_TYPE_PING = 6
 PIA_REQUEST_TIMEOUT = 30.0
 STANDBY_WAKE_UPDATE_TOKENS_DELAY = 3.0
 STANDBY_WAKE_RESUBSCRIBE_DELAY = 0.75
+
+# The ehgAccessToken sent in UpdateTokens expires after roughly 30 minutes.
+# Once it lapses the SCU silently drops commands even though the WebSocket
+# and subscription stream still look healthy, so refresh well ahead of it
+# rather than waiting for a command to fail and recover reactively.
+UPDATE_TOKENS_INTERVAL = 15 * 60
 
 # After this long in 12V standby the server-side hub->SCU command routing
 # goes stale: outbound commands are silently dropped even though the
@@ -103,6 +110,7 @@ class HymerSignalRClient:
         self._signalr_token: str = ""
         self._connected_at: float = 0.0  # monotonic timestamp of connection
         self._last_data_received: float = 0.0  # monotonic timestamp of last data
+        self._last_update_tokens: float = 0.0  # monotonic ts of last UpdateTokens
         self._scu_standby_since: float = 0.0  # monotonic ts of standby entry
         self._connection_lost_notified = False
         self._completion_futures: dict[str, asyncio.Future[bool]] = {}
@@ -546,6 +554,10 @@ class HymerSignalRClient:
             future = asyncio.get_running_loop().create_future()
             self._completion_futures[invocation_id] = future
         await self._ws.send_str(json.dumps(msg) + SIGNALR_RECORD_SEPARATOR)
+        # Record the send for the periodic-refresh check in send_refresh().
+        # Stamped here so every caller — connect, standby wake/entry, the
+        # expiry retry and the periodic refresh — resets the clock.
+        self._last_update_tokens = time.monotonic()
 
         if not wait_response:
             _LOGGER.debug("UpdateTokens sent in fire-and-forget mode")
@@ -749,6 +761,73 @@ class HymerSignalRClient:
             self._pending_requests.clear()
             self._waiting_request_ids.clear()
             self._notify_connection_lost()
+
+    async def send_refresh(self) -> None:
+        """Poll the SCU so it keeps publishing sensor data.
+
+        The SCU stops pushing updates after a few minutes of silence, so the
+        coordinator calls this once per poll interval.  This also refreshes
+        the EHG access token every ``UPDATE_TOKENS_INTERVAL``, ahead of the
+        expiry that would otherwise cause commands to be dropped.
+
+        Deliberately fire-and-forget.  A poll is not reliably answered with a
+        matching PiaResponse, so routing it through :meth:`send_pia_request`
+        would leave a pending future to time out — stalling the coordinator
+        for ``PIA_REQUEST_TIMEOUT`` on every poll and logging a warning each
+        time.  Any slot data the SCU does return is still handled normally by
+        the listen loop.
+
+        Never raises: a failed keepalive must not fail the coordinator update.
+        """
+        if not self.connected:
+            return
+        if self._token_refresh_task is not None and not self._token_refresh_task.done():
+            _LOGGER.debug(
+                "Token refresh in progress for %s — skipping keepalive",
+                self._vehicle_urn,
+            )
+            return
+
+        token_age = time.monotonic() - self._last_update_tokens
+        if self._last_update_tokens and token_age >= UPDATE_TOKENS_INTERVAL:
+            _LOGGER.info(
+                "EHG access token age %.0fs exceeds %ds for %s — refreshing",
+                token_age,
+                int(UPDATE_TOKENS_INTERVAL),
+                self._vehicle_urn,
+            )
+            try:
+                await self._send_update_tokens(wait_response=False)
+            except Exception:
+                _LOGGER.warning(
+                    "Periodic UpdateTokens refresh failed for %s",
+                    self._vehicle_urn,
+                    exc_info=True,
+                )
+
+        # Skip the poll during 12V standby.  The SCU has no fresh data to
+        # report, and it can echo stale cached slot values — which would
+        # register as a spurious wake and trigger the wake-refresh path.
+        if self._scu_standby_since > 0:
+            _LOGGER.debug(
+                "SCU in standby for %s — skipping keepalive poll",
+                self._vehicle_urn,
+            )
+            return
+
+        payload = build_refresh_command()
+        request_id = extract_request_id_from_payload(payload)
+        if request_id is None:
+            _LOGGER.debug("Keepalive refresh payload carried no request id")
+            return
+        try:
+            await self._send_request_payload(request_id, payload)
+        except Exception:
+            _LOGGER.debug(
+                "Keepalive refresh send failed for %s",
+                self._vehicle_urn,
+                exc_info=True,
+            )
 
     async def send_pia_request(self, b64_payload: str) -> bool:
         """Send a PiaRequest message to the SCU."""

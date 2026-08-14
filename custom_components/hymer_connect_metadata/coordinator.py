@@ -53,6 +53,11 @@ _RAPID_DROP_THRESHOLD = 30  # seconds — a session shorter than this is a rapid
 _RAPID_DROP_COOLDOWN = 5  # seconds to wait before reconnecting after a rapid drop
 _REST_METADATA_INTERVAL = 600  # 10 minutes between full REST metadata refreshes
 _CAPABILITY_RELOAD_DEBOUNCE_S = 5
+# A connection younger than this that has produced no data may still have
+# subscriptions in flight; commands sent into that window can be dropped.
+_SUBSCRIPTION_SETTLE_WINDOW = 10  # seconds
+_SUBSCRIPTION_CONFIRM_TIMEOUT = 5.0  # seconds to wait for the first frame
+_SUBSCRIPTION_POLL_INTERVAL = 0.1
 _ACTIVE_SLOT_WINDOW_S = 30 * 60  # 30 min — recent enough to count as currently active
 
 
@@ -479,9 +484,58 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.start_signalr()
         client = self._signalr
         if client and client.connected:
+            await self._await_subscription_confirmation()
             return client
         raise HomeAssistantError(
             "SignalR is not connected. Try reloading the integration."
+        )
+
+    async def _await_subscription_confirmation(self) -> None:
+        """Briefly wait for the first frame after a reconnect before sending.
+
+        Subscriptions are sent as part of the connect, but the SCU may not
+        have finished processing them when a command follows immediately.
+        Commands that land in that window are silently dropped.  The arrival
+        of any slot data proves the subscriptions are live.
+
+        Only applies right after a reconnect that has produced no data yet;
+        an established connection returns immediately.
+        """
+        if self._slot_data:
+            return
+        connected_for = (
+            time.monotonic() - self._signalr_connected_at
+            if self._signalr_connected_at
+            else None
+        )
+        if connected_for is None or connected_for >= _SUBSCRIPTION_SETTLE_WINDOW:
+            return
+
+        _LOGGER.info(
+            "SignalR reconnected %.1fs ago for %s with no data yet — waiting for "
+            "subscription confirmation before sending",
+            connected_for,
+            self.config_entry.title,
+        )
+        # Poll _slot_data directly rather than reusing wait_for_first_frame():
+        # that stamps _setup_slot_baseline, which drives new-slot detection,
+        # and setting it from the command path could trigger spurious
+        # capability reloads.
+        started = time.monotonic()
+        while time.monotonic() - started < _SUBSCRIPTION_CONFIRM_TIMEOUT:
+            if self._slot_data:
+                _LOGGER.debug(
+                    "Subscriptions confirmed active for %s after %.1fs",
+                    self.config_entry.title,
+                    time.monotonic() - started,
+                )
+                return
+            await asyncio.sleep(_SUBSCRIPTION_POLL_INTERVAL)
+        _LOGGER.warning(
+            "No sensor data %.0fs after reconnect for %s — sending anyway; "
+            "subscriptions may not be active yet",
+            _SUBSCRIPTION_CONFIRM_TIMEOUT,
+            self.config_entry.title,
         )
 
     async def async_ensure_signalr_connected(self) -> _SignalRCommandProxy:
@@ -909,6 +963,20 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     remaining,
                     self._consecutive_failures,
                     _MAX_CONSECUTIVE_FAILURES,
+                )
+        else:
+            # Keep the SCU publishing: it falls silent after a few minutes
+            # without a poll, which strands every entity on its last value.
+            # send_refresh() also refreshes the EHG access token on its own
+            # schedule.  It never raises, but guard anyway so a keepalive
+            # problem can never fail the coordinator update.
+            try:
+                await self._signalr.send_refresh()
+            except Exception:
+                _LOGGER.debug(
+                    "SignalR keepalive refresh failed for %s",
+                    self.config_entry.title,
+                    exc_info=True,
                 )
 
         # Merge REST + SignalR data

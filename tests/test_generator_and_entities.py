@@ -476,6 +476,10 @@ class GeneratorAndEntityTests(unittest.TestCase):
             connected = True
             needs_reconnect = False
 
+            async def send_refresh(self) -> None:
+                """Keepalive poll the coordinator sends once per update."""
+                return None
+
         coordinator = cls.__new__(cls)
         stale = time.monotonic() - (coordinator_mod._ACTIVE_SLOT_WINDOW_S + 1)
         coordinator._cached_rest_data = {"vehicle": {}}
@@ -492,7 +496,12 @@ class GeneratorAndEntityTests(unittest.TestCase):
         coordinator.config_entry = type(
             "Entry",
             (),
-            {"data": {}, "unique_id": "entry-1", "entry_id": "entry-1"},
+            {
+                "data": {},
+                "unique_id": "entry-1",
+                "entry_id": "entry-1",
+                "title": "Test Van",
+            },
         )()
         coordinator.api = type("Api", (), {})()
         coordinator.hass = type(
@@ -507,6 +516,141 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         self.assertEqual(data["signalr_slots"], {(1, 1): 1})
         self.assertEqual(coordinator.active_slots, set())
+
+    def test_async_update_data_sends_keepalive_refresh_while_connected(self) -> None:
+        install_homeassistant_stubs()
+        import sys
+
+        sys.modules.pop("custom_components.hymer_connect_metadata.coordinator", None)
+        ensure_package_paths()
+        coordinator_mod = importlib.import_module("custom_components.hymer_connect_metadata.coordinator")
+        cls = coordinator_mod.HymerConnectCoordinator
+
+        refreshes: list[int] = []
+
+        class SignalR:
+            connected = True
+            needs_reconnect = False
+
+            async def send_refresh(self) -> None:
+                refreshes.append(1)
+
+        coordinator = cls.__new__(cls)
+        coordinator._cached_rest_data = {"vehicle": {}}
+        coordinator._last_rest_metadata_refresh = time.monotonic()
+        coordinator._vehicle_urn = ""
+        coordinator._scu_urn = ""
+        coordinator._vehicle_id = None
+        coordinator._vin = ""
+        coordinator._slot_data = {(1, 1): 1}
+        coordinator._slot_last_seen = {(1, 1): time.monotonic()}
+        coordinator._signalr = SignalR()
+        coordinator._last_reconnect_attempt = 0.0
+        coordinator._reconnect_backoff = coordinator_mod._INITIAL_BACKOFF
+        coordinator.config_entry = type(
+            "Entry",
+            (),
+            {
+                "data": {},
+                "unique_id": "entry-1",
+                "entry_id": "entry-1",
+                "title": "Test Van",
+            },
+        )()
+        coordinator.api = type("Api", (), {})()
+        coordinator.hass = type(
+            "Hass",
+            (),
+            {"config_entries": type("Cfg", (), {"async_entries": lambda self, domain: []})()},
+        )()
+
+        import asyncio
+
+        asyncio.run(coordinator._async_update_data())
+
+        # The SCU stops publishing without a poll, so every connected update
+        # must prod it.
+        self.assertEqual(refreshes, [1])
+
+    def test_command_waits_for_first_frame_after_reconnect(self) -> None:
+        install_homeassistant_stubs()
+        import sys
+
+        sys.modules.pop("custom_components.hymer_connect_metadata.coordinator", None)
+        ensure_package_paths()
+        coordinator_mod = importlib.import_module("custom_components.hymer_connect_metadata.coordinator")
+        cls = coordinator_mod.HymerConnectCoordinator
+
+        class Client:
+            connected = True
+            needs_reconnect = False
+            scu_standby_seconds = 0.0
+
+        coordinator = cls.__new__(cls)
+        coordinator._signalr = None
+        coordinator._slot_data = {}
+        coordinator._signalr_connected_at = time.monotonic()
+        coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
+
+        async def start_signalr() -> None:
+            coordinator._signalr = Client()
+
+        coordinator.start_signalr = start_signalr
+
+        import asyncio
+
+        async def run_test() -> None:
+            async def deliver_first_frame() -> None:
+                await asyncio.sleep(0.2)
+                coordinator._slot_data[(1, 1)] = 1
+
+            frame = asyncio.create_task(deliver_first_frame())
+            started = time.monotonic()
+            client = await coordinator.async_ensure_signalr_healthy()
+            waited = time.monotonic() - started
+            await frame
+
+            self.assertIsNotNone(client)
+            # It waited for data proving the subscriptions were live, rather
+            # than firing the command into a window where it would be dropped.
+            self.assertGreaterEqual(waited, 0.2)
+            self.assertLess(waited, coordinator_mod._SUBSCRIPTION_CONFIRM_TIMEOUT)
+
+        asyncio.run(run_test())
+
+    def test_command_does_not_wait_when_data_already_flowing(self) -> None:
+        install_homeassistant_stubs()
+        import sys
+
+        sys.modules.pop("custom_components.hymer_connect_metadata.coordinator", None)
+        ensure_package_paths()
+        coordinator_mod = importlib.import_module("custom_components.hymer_connect_metadata.coordinator")
+        cls = coordinator_mod.HymerConnectCoordinator
+
+        class Client:
+            connected = True
+            needs_reconnect = False
+            scu_standby_seconds = 0.0
+
+        coordinator = cls.__new__(cls)
+        coordinator._signalr = None
+        coordinator._slot_data = {(1, 1): 1}
+        coordinator._signalr_connected_at = time.monotonic()
+        coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
+
+        async def start_signalr() -> None:
+            coordinator._signalr = Client()
+
+        coordinator.start_signalr = start_signalr
+
+        import asyncio
+
+        async def run_test() -> None:
+            started = time.monotonic()
+            await coordinator.async_ensure_signalr_healthy()
+            self.assertLess(time.monotonic() - started, 0.1)
+
+        asyncio.run(run_test())
 
     def test_coordinator_send_retries_once_after_failed_signalr_command(self) -> None:
         install_homeassistant_stubs()
@@ -542,6 +686,10 @@ class GeneratorAndEntityTests(unittest.TestCase):
         coordinator = cls.__new__(cls)
         coordinator._signalr = first
         coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
+        # Existing slot data means the post-reconnect subscription wait
+        # returns immediately, keeping this test on the retry behaviour.
+        coordinator._slot_data = {(1, 1): 1}
+        coordinator._signalr_connected_at = 0.0
 
         async def start_signalr() -> None:
             coordinator._signalr = second
@@ -914,6 +1062,148 @@ class GeneratorAndEntityTests(unittest.TestCase):
             client._token_refresh_task = asyncio.create_task(asyncio.sleep(60))
             await client.stop()
             self.assertIsNone(client._token_refresh_task)
+
+        asyncio.run(run_test())
+
+    @staticmethod
+    def _connected_signalr_client(cls):
+        """Build a client that reports connected, with a stub WebSocket."""
+        client = cls(
+            api=object(),
+            session=object(),
+            vehicle_urn="vehicle",
+            scu_urn="scu",
+        )
+        client._ws = type("WS", (), {"closed": False})()
+        client._connected = True
+        return client
+
+    def test_send_refresh_polls_scu_without_awaiting_completion(self) -> None:
+        ensure_package_paths()
+        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
+        pia_decoder = importlib.import_module("custom_components.hymer_connect_metadata.pia_decoder")
+        cls = signalr_mod.HymerSignalRClient
+
+        import asyncio
+
+        async def run_test() -> None:
+            client = self._connected_signalr_client(cls)
+            client._last_update_tokens = time.monotonic()
+            sent: list[str] = []
+
+            async def fake_send_payload(request_id: int, payload: str) -> None:
+                sent.append(payload)
+
+            client._send_request_payload = fake_send_payload
+
+            await client.send_refresh()
+
+            self.assertEqual(len(sent), 1)
+            # The poll rides the wrapped subscription-transport envelope:
+            # an outer field 2 holding the request, whose field 9 (empty) is
+            # the refresh topic.
+            outer = pia_decoder._decode_protobuf(base64.b64decode(sent[0]))
+            self.assertEqual([(fn, wt) for fn, wt, _ in outer], [(2, 2)])
+            request = pia_decoder._decode_protobuf(outer[0][2])
+            self.assertEqual(
+                [(fn, wt) for fn, wt, _ in request],
+                [(1, 0), (2, 2), (3, 0), (9, 2)],
+            )
+            # Fire-and-forget: nothing is left waiting on a completion, so the
+            # coordinator is never blocked for PIA_REQUEST_TIMEOUT.
+            self.assertEqual(client._pending_requests, {})
+
+        asyncio.run(run_test())
+
+    def test_send_refresh_skips_poll_while_scu_in_standby(self) -> None:
+        ensure_package_paths()
+        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
+        cls = signalr_mod.HymerSignalRClient
+
+        import asyncio
+
+        async def run_test() -> None:
+            client = self._connected_signalr_client(cls)
+            client._last_update_tokens = time.monotonic()
+            client._scu_standby_since = time.monotonic()
+            sent: list[str] = []
+
+            async def fake_send_payload(request_id: int, payload: str) -> None:
+                sent.append(payload)
+
+            client._send_request_payload = fake_send_payload
+
+            await client.send_refresh()
+
+            # Polling a sleeping SCU can echo stale cached slots, which would
+            # read as a spurious wake.
+            self.assertEqual(sent, [])
+
+        asyncio.run(run_test())
+
+    def test_send_refresh_renews_update_tokens_once_past_interval(self) -> None:
+        ensure_package_paths()
+        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
+        cls = signalr_mod.HymerSignalRClient
+        interval = signalr_mod.UPDATE_TOKENS_INTERVAL
+
+        import asyncio
+
+        async def run_test() -> None:
+            client = self._connected_signalr_client(cls)
+
+            async def fake_send_payload(request_id: int, payload: str) -> None:
+                return None
+
+            client._send_request_payload = fake_send_payload
+
+            calls: list[bool] = []
+
+            async def fake_update_tokens(wait_response: bool = True) -> bool:
+                calls.append(wait_response)
+                return True
+
+            client._send_update_tokens = fake_update_tokens
+
+            # Fresh token: left alone.
+            client._last_update_tokens = time.monotonic()
+            await client.send_refresh()
+            self.assertEqual(calls, [])
+
+            # Past the interval: renewed, without blocking on a response.
+            client._last_update_tokens = time.monotonic() - (interval + 1)
+            await client.send_refresh()
+            self.assertEqual(calls, [False])
+
+        asyncio.run(run_test())
+
+    def test_send_refresh_is_noop_before_first_update_tokens(self) -> None:
+        ensure_package_paths()
+        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
+        cls = signalr_mod.HymerSignalRClient
+
+        import asyncio
+
+        async def run_test() -> None:
+            client = self._connected_signalr_client(cls)
+
+            async def fake_send_payload(request_id: int, payload: str) -> None:
+                return None
+
+            client._send_request_payload = fake_send_payload
+
+            calls: list[bool] = []
+
+            async def fake_update_tokens(wait_response: bool = True) -> bool:
+                calls.append(wait_response)
+                return True
+
+            client._send_update_tokens = fake_update_tokens
+
+            # _last_update_tokens is 0 until the first UpdateTokens is sent;
+            # a huge apparent age must not trigger a spurious refresh.
+            await client.send_refresh()
+            self.assertEqual(calls, [])
 
         asyncio.run(run_test())
 

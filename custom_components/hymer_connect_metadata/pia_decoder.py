@@ -197,18 +197,12 @@ def build_refresh_command() -> str:
 
     The EHG app sends this after subscribing (shows "aktualisiere").
     Uses protobuf field 9 (empty) which triggers a full state refresh.
+
+    Carried on the same wrapped transport envelope as the subscription
+    burst it accompanies — not the unwrapped ``_build_cloud_request``
+    envelope used for command topics such as restart.
     """
-    import random
-    msg_id = random.randint(1, 10_000_000)
-    ts = int(time.time())
-
-    wrapper = _encode_varint_field(1, msg_id)
-    wrapper += _encode_bytes_field(2, b"v0.32.0")
-    wrapper += _encode_varint_field(3, ts)
-    wrapper += _encode_bytes_field(9, b"")  # field 9 = refresh/poll
-
-    payload = _encode_bytes_field(2, wrapper)
-    return base64.b64encode(payload).decode("ascii")
+    return _build_subscription_request(topic_field_number=9, topic_payload=b"")
 
 
 def decode_pia_slots(
