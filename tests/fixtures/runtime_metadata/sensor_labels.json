@@ -2,7 +2,7 @@
   "_comment": "Synthetic runtime metadata fixture used by the unit test suite.",
   "slots": {
     "1:1": {"label": "odometer", "datatype": "int", "mode": "r", "wire_mode": "r", "unit": "km", "transform": "div1000"},
-    "1:2": {"label": "fuel_level", "datatype": "float", "mode": "r", "wire_mode": "r", "unit": "%", "transform": "invert100"},
+    "1:2": {"label": "fuel_level", "datatype": "float", "mode": "r", "wire_mode": "r", "unit": "%"},
     "1:5": {"label": "distance_to_service", "datatype": "int", "mode": "r", "wire_mode": "r", "unit": "km"},
     "1:7": {"label": "adblue_remaining_distance", "datatype": "int", "mode": "r", "wire_mode": "r", "unit": "km", "transform": "div1000"},
     "2:8": {"label": "fresh_water_level_secondary", "datatype": "int", "mode": "r", "wire_mode": "r", "unit": "%"},

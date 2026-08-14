@@ -2295,8 +2295,10 @@ class GeneratorAndEntityTests(unittest.TestCase):
         self.assertEqual(slots["1:5"]["label"], "distance_to_service")
         self.assertNotIn("transform", slots["1:5"])
 
+        # fuel_level is a straight fill percentage — a full tank reports 100.
+        # An invert100 transform here would report a full tank as 0%.
         self.assertEqual(slots["1:2"]["label"], "fuel_level")
-        self.assertEqual(slots["1:2"]["transform"], "invert100")
+        self.assertNotIn("transform", slots["1:2"])
 
         self.assertEqual(slots["1:7"]["label"], "adblue_remaining_distance")
         self.assertEqual(slots["1:7"]["transform"], "div1000")

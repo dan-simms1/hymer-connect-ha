@@ -18,11 +18,15 @@ _LOGGER = logging.getLogger(__name__)
 # These are not used by the live runtime decode path.
 LEGACY_TRANSFORM_HINTS: dict[tuple[int, int], dict[str, str | None]] = {
     (1, 1): {"label": "odometer", "unit": "km", "transform": "div1000"},
-    (1, 2): {"label": "fuel_level", "unit": "%", "transform": "invert100"},
+    # (1, 2) / (108, 2) fuel_level: NO transform. The SCU reports
+    # FuelTankLevel as a straight fill percentage, so a full tank is 100.
+    # An `invert100` hint here previously turned a full tank into 0%.
+    # Upstream applies no transform to this slot either, while using
+    # div1000/div10/div3600 on neighbouring slots of the same component —
+    # so its absence there is deliberate, not an oversight.
     (1, 5): {"label": "distance_to_service", "unit": "km"},
     (1, 7): {"label": "adblue_remaining_distance", "unit": "km", "transform": "div1000"},
     (34, 7): {"label": "heat_setpoint_raw", "unit": None, "transform": "div1000"},
-    (108, 2): {"label": "fuel_level", "unit": "%", "transform": "invert100"},
 }
 
 # Sentinel float values that indicate "sensor unavailable / not connected".
