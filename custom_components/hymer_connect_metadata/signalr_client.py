@@ -51,6 +51,9 @@ STANDBY_WAKE_RESUBSCRIBE_DELAY = 0.75
 # and subscription stream still look healthy, so refresh well ahead of it
 # rather than waiting for a command to fail and recover reactively.
 UPDATE_TOKENS_INTERVAL = 15 * 60
+# Minimum gap between renewal attempts once one is overdue, so a persistently
+# failing renewal does not run a token exchange on every 60s poll.
+UPDATE_TOKENS_RETRY_INTERVAL = 5 * 60
 
 # After this long in 12V standby the server-side hub->SCU command routing
 # goes stale: outbound commands are silently dropped even though the
@@ -788,32 +791,19 @@ class HymerSignalRClient:
         """
         if not self.connected:
             return
-        if self._refresh_in_flight():
-            _LOGGER.debug(
-                "Auth refresh in progress for %s — skipping keepalive",
-                self._vehicle_urn,
-            )
-            return
 
-        # Renew the EHG access token ahead of expiry.  Scheduled rather than
-        # awaited: the renewal performs an HTTP token exchange, and blocking
-        # here would stall the coordinator's update cycle.  Routing it through
-        # the shared refresh task also means in-flight commands are queued and
-        # replayed against the new token instead of racing it.
-        success_age = time.monotonic() - self._last_update_tokens_success
-        if (
-            self._last_update_tokens_success
-            and success_age >= UPDATE_TOKENS_INTERVAL
-        ):
-            _LOGGER.info(
-                "EHG access token last confirmed %.0fs ago for %s — refreshing",
-                success_age,
+        self._maybe_renew_access_token()
+
+        if self._refresh_in_flight():
+            # Bounded: every refresh path completes or times out, so at most a
+            # cycle or two of polls is skipped.  The unbounded case — renewal
+            # never succeeding and suppressing polls forever — is prevented by
+            # _maybe_renew_access_token() no longer returning early and by its
+            # retry interval.
+            _LOGGER.debug(
+                "Auth refresh in progress for %s — skipping this poll",
                 self._vehicle_urn,
             )
-            # Same operation as the expiry-driven path: re-send UpdateTokens
-            # and replay anything queued behind it.  STATUS_REMOTE_TOKEN_EXPIRED
-            # selects that behaviour without also re-running the OAuth2 refresh.
-            self._schedule_token_refresh_retry(STATUS_REMOTE_TOKEN_EXPIRED, None)
             return
 
         # Skip the poll during 12V standby.  The SCU has no fresh data to
@@ -845,6 +835,50 @@ class HymerSignalRClient:
             )
             self._connected = False
             self._notify_connection_lost()
+
+    def _maybe_renew_access_token(self) -> None:
+        """Schedule an EHG access-token renewal if one is due.
+
+        Scheduled rather than awaited: the renewal performs an HTTP token
+        exchange, and blocking here would stall the coordinator's update
+        cycle.  Routing it through the shared refresh task also means
+        in-flight commands are queued and replayed against the new token
+        instead of racing it.
+
+        Renewal never gates the poll.  An earlier revision returned here after
+        scheduling, which meant a renewal that kept failing — success never
+        advancing — suppressed every telemetry poll from then on, defeating
+        the keepalive entirely.
+        """
+        if not self._last_update_tokens_success:
+            # Nothing confirmed yet; connect-time UpdateTokens owns this.
+            return
+        now = time.monotonic()
+        if now - self._last_update_tokens_success < UPDATE_TOKENS_INTERVAL:
+            return
+        if self._refresh_in_flight():
+            return
+        if (
+            self._last_update_tokens_attempt
+            and now - self._last_update_tokens_attempt < UPDATE_TOKENS_RETRY_INTERVAL
+        ):
+            # Back off between attempts: without this a persistently failing
+            # renewal would run a token exchange on every poll.
+            return
+
+        _LOGGER.info(
+            "EHG access token last confirmed %.0fs ago for %s — renewing",
+            now - self._last_update_tokens_success,
+            self._vehicle_urn,
+        )
+        # Stamp the attempt here rather than relying on _send_update_tokens:
+        # the renewal can fail in the token exchange before anything is sent,
+        # which would leave the timestamp unset and defeat the backoff above.
+        self._last_update_tokens_attempt = now
+        # Same operation as the expiry-driven path: re-send UpdateTokens and
+        # replay anything queued behind it.  STATUS_REMOTE_TOKEN_EXPIRED
+        # selects that behaviour without also re-running the OAuth2 refresh.
+        self._schedule_token_refresh_retry(STATUS_REMOTE_TOKEN_EXPIRED, None)
 
     def _refresh_in_flight(self) -> bool:
         """Return True while any auth-refresh task is still running.

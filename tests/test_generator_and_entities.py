@@ -17,6 +17,18 @@ from zipfile import ZipFile
 from tests.hymer_test_support import ensure_package_paths, install_homeassistant_stubs
 
 
+def seed_connection_state(coordinator, *, frame_seen: bool = True) -> None:
+    """Seed the connection-generation state ``__init__`` would normally set.
+
+    These tests build coordinators with ``cls.__new__`` to avoid the real
+    constructor, so any state the code under test reads has to be supplied
+    here.  ``frame_seen`` controls whether the current connection counts as
+    proven live.
+    """
+    coordinator._signalr_generation = 1
+    coordinator._frame_generation = 1 if frame_seen else 0
+
+
 class GeneratorAndEntityTests(unittest.TestCase):
     def test_signed_range_normalization(self) -> None:
         from scripts.generate_cleanroom_registry import _normalize_signed_32
@@ -409,6 +421,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
         cls = coordinator_mod.HymerConnectCoordinator
 
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         coordinator._slot_data = {(1, 1): 1}
         coordinator._slot_last_seen = {(1, 1): time.monotonic()}
         coordinator._entry_setup_complete = False
@@ -435,6 +448,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
         cls = coordinator_mod.HymerConnectCoordinator
 
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         coordinator._slot_data = {(1, 1): 1, (1, 2): 2}
         coordinator._slot_last_seen = {
             (1, 1): time.monotonic(),
@@ -454,6 +468,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
         cls = coordinator_mod.HymerConnectCoordinator
 
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         stale = time.monotonic() - (coordinator_mod._ACTIVE_SLOT_WINDOW_S + 1)
         coordinator._slot_data = {(1, 1): 1, (1, 2): 2}
         coordinator._slot_last_seen = {(1, 1): stale, (1, 2): stale}
@@ -481,6 +496,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
                 return None
 
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         stale = time.monotonic() - (coordinator_mod._ACTIVE_SLOT_WINDOW_S + 1)
         coordinator._cached_rest_data = {"vehicle": {}}
         coordinator._last_rest_metadata_refresh = time.monotonic()
@@ -536,6 +552,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
                 refreshes.append(1)
 
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         coordinator._cached_rest_data = {"vehicle": {}}
         coordinator._last_rest_metadata_refresh = time.monotonic()
         coordinator._vehicle_urn = ""
@@ -572,6 +589,41 @@ class GeneratorAndEntityTests(unittest.TestCase):
         # must prod it.
         self.assertEqual(refreshes, [1])
 
+    def test_signalr_update_stamps_the_delivering_generation(self) -> None:
+        install_homeassistant_stubs()
+        import sys
+
+        sys.modules.pop("custom_components.hymer_connect_metadata.coordinator", None)
+        ensure_package_paths()
+        coordinator_mod = importlib.import_module("custom_components.hymer_connect_metadata.coordinator")
+        cls = coordinator_mod.HymerConnectCoordinator
+
+        coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator, frame_seen=False)
+        coordinator._slot_data = {}
+        coordinator._slot_last_seen = {}
+        coordinator._entry_setup_complete = True
+        coordinator._setup_slot_baseline = None
+        coordinator._pending_setup_slots = set()
+        coordinator._capability_reload_slots = set()
+        coordinator._capability_reload_task = None
+        coordinator.data = {}
+        coordinator._schedule_capability_reload = lambda slots: None
+        coordinator.async_set_updated_data = lambda data: setattr(
+            coordinator, "data", data
+        )
+
+        coordinator._signalr_generation = 7
+
+        # A frame from a superseded connection must not mark the current one
+        # as proven live.
+        coordinator._on_signalr_update({(1, 1): 1}, 6)
+        self.assertFalse(coordinator._frame_seen_on_current_connection())
+
+        # A frame from this connection does.
+        coordinator._on_signalr_update({(1, 2): 2}, 7)
+        self.assertTrue(coordinator._frame_seen_on_current_connection())
+
     def test_command_waits_for_first_frame_after_reconnect(self) -> None:
         install_homeassistant_stubs()
         import sys
@@ -587,12 +639,13 @@ class GeneratorAndEntityTests(unittest.TestCase):
             scu_standby_seconds = 0.0
 
         coordinator = cls.__new__(cls)
+        # No frame on the current generation yet, but slot data survives
+        # reconnects — a populated cache must NOT be mistaken for proof that
+        # this session's subscriptions are live.
+        seed_connection_state(coordinator, frame_seen=False)
         coordinator._signalr = None
-        # Slot data survives reconnects, so a populated cache must NOT be
-        # mistaken for proof that the new session's subscriptions are live.
         coordinator._slot_data = {(1, 1): "from previous connection"}
         coordinator._signalr_connected_at = time.monotonic()
-        coordinator._last_frame_at = 0.0
         coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
 
         async def start_signalr() -> None:
@@ -605,8 +658,10 @@ class GeneratorAndEntityTests(unittest.TestCase):
         async def run_test() -> None:
             async def deliver_first_frame() -> None:
                 await asyncio.sleep(0.2)
+                # What _on_signalr_update does for this connection; that
+                # handler's own stamping is covered separately.
                 coordinator._slot_data[(1, 1)] = "from this connection"
-                coordinator._last_frame_at = time.monotonic()
+                coordinator._frame_generation = coordinator._signalr_generation
 
             frame = asyncio.create_task(deliver_first_frame())
             started = time.monotonic()
@@ -637,6 +692,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
             scu_standby_seconds = 0.0
 
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         coordinator._signalr = None
         coordinator._slot_data = {(1, 1): 1}
         coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
@@ -644,8 +700,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
         async def start_signalr() -> None:
             coordinator._signalr = Client()
             # A frame has already landed on this connection.
-            coordinator._signalr_connected_at = time.monotonic()
-            coordinator._last_frame_at = time.monotonic()
+            seed_connection_state(coordinator, frame_seen=True)
 
         coordinator.start_signalr = start_signalr
 
@@ -690,6 +745,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
         first = Client(False)
         second = Client(True)
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         coordinator._signalr = first
         coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
         # Existing slot data means the post-reconnect subscription wait
@@ -734,6 +790,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
         stale = Client(threshold + 1)
         fresh = Client(0.0)
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         coordinator._signalr = stale
         coordinator._slot_data = {(1, 1): 1}
         coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
@@ -745,8 +802,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
             coordinator._signalr = fresh
             # The reconnected session is immediately live, so the settling
             # wait this path now performs returns without delay.
-            coordinator._signalr_connected_at = time.monotonic()
-            coordinator._last_frame_at = time.monotonic()
+            seed_connection_state(coordinator, frame_seen=True)
 
         coordinator.force_reauth_and_reconnect = force_reauth_and_reconnect
 
@@ -779,6 +835,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         client = Client()
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         coordinator._signalr = client
         coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
 
@@ -808,6 +865,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         created: list[object] = []
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         coordinator._suppress_connection_lost_refresh = True
         coordinator._reconnect_task = None
         coordinator._reconnect_backoff = 123
@@ -840,6 +898,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         created: list[object] = []
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         coordinator._capability_reload_task = None
         coordinator._capability_reload_slots = set()
         coordinator._reconnect_task = None
@@ -871,6 +930,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         created: list[object] = []
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         coordinator._shutting_down = True
         coordinator._suppress_connection_lost_refresh = False
         coordinator._reconnect_task = None
@@ -906,6 +966,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
         async def run_test() -> None:
             signalr = SignalR()
             coordinator = cls.__new__(cls)
+            seed_connection_state(coordinator)
             coordinator._background_tasks = set()
             coordinator._capability_reload_task = None
             coordinator._capability_reload_slots = set()
@@ -941,6 +1002,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
         slot = next(iter(capability_resolver.main_switch_slots()))
 
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         coordinator._slot_data = {slot: "Off"}
         coordinator.data = {"signalr_slots": {slot: "Off"}}
         self.assertFalse(coordinator.is_habitation_power_available())
@@ -962,6 +1024,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
         cls = coordinator_mod.HymerConnectCoordinator
 
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         coordinator._background_tasks = set()
         coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
 
@@ -1099,7 +1162,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         async def run_test() -> None:
             client = self._connected_signalr_client(cls)
-            client._last_update_tokens = time.monotonic()
+            client._last_update_tokens_success = time.monotonic()
             sent: list[str] = []
 
             async def fake_send_payload(request_id: int, payload: str) -> None:
@@ -1135,7 +1198,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         async def run_test() -> None:
             client = self._connected_signalr_client(cls)
-            client._last_update_tokens = time.monotonic()
+            client._last_update_tokens_success = time.monotonic()
             client._scu_standby_since = time.monotonic()
             sent: list[str] = []
 
@@ -1288,21 +1351,67 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         # A keepalive is never registered in _pending_requests, so a late
         # response reusing a command's id would resolve that command's future
-        # and report an unacknowledged vehicle write as successful.
-        for _ in range(200):
-            keepalive_id = pia_decoder.extract_request_id_from_payload(
-                pia_decoder.build_refresh_command()
-            )
+        # and report an unacknowledged vehicle write as successful.  Both
+        # boundaries are pinned rather than sampled, so a range that drifted
+        # back into the app space cannot slip through on lucky draws.
+        for boundary in (
+            pia_decoder._KEEPALIVE_REQUEST_ID_MIN,
+            pia_decoder._KEEPALIVE_REQUEST_ID_MAX,
+        ):
+            with mock.patch("random.randint", return_value=boundary):
+                keepalive_id = pia_decoder.extract_request_id_from_payload(
+                    pia_decoder.build_refresh_command()
+                )
+            self.assertEqual(keepalive_id, boundary)
             self.assertGreater(keepalive_id, pia_decoder._APP_REQUEST_ID_MAX)
-            self.assertLessEqual(
-                keepalive_id, pia_decoder._KEEPALIVE_REQUEST_ID_MAX
-            )
 
+        # The band sits entirely above every app-shaped id.
+        self.assertGreater(
+            pia_decoder._KEEPALIVE_REQUEST_ID_MIN,
+            pia_decoder._APP_REQUEST_ID_MAX,
+        )
         for _ in range(200):
             command_id = pia_decoder.extract_request_id_from_payload(
                 pia_decoder.build_light_command(3, 1, bool_value=True)
             )
             self.assertLessEqual(command_id, pia_decoder._APP_REQUEST_ID_MAX)
+
+    def test_failed_token_renewal_does_not_starve_keepalive_polls(self) -> None:
+        ensure_package_paths()
+        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
+        cls = signalr_mod.HymerSignalRClient
+
+        import asyncio
+
+        async def run_test() -> None:
+            client = self._connected_signalr_client(cls)
+            # Overdue, and every renewal fails so success never advances.
+            client._last_update_tokens_success = (
+                time.monotonic() - signalr_mod.UPDATE_TOKENS_INTERVAL - 1
+            )
+            polls: list[str] = []
+            renewals: list[int] = []
+
+            async def fake_send(request_id: int, payload: str) -> None:
+                polls.append(payload)
+
+            client._send_request_payload = fake_send
+            client._schedule_token_refresh_retry = (
+                lambda status, request_id: renewals.append(status)
+            )
+
+            for _ in range(3):
+                await client.send_refresh()
+
+            # An earlier revision returned straight after scheduling renewal,
+            # so a renewal that never succeeded silently suppressed every
+            # telemetry poll from then on — defeating the keepalive entirely.
+            self.assertEqual(len(polls), 3)
+            # And the failing renewal is rate-limited rather than re-run on
+            # every 60s cycle.
+            self.assertEqual(len(renewals), 1)
+
+        asyncio.run(run_test())
 
     def test_update_tokens_success_only_stamped_on_accepted_completion(self) -> None:
         ensure_package_paths()
@@ -1681,6 +1790,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
         coordinator_mod.HymerSignalRClient = FakeClient
         try:
             coordinator = cls.__new__(cls)
+            seed_connection_state(coordinator)
             coordinator.api = object()
             coordinator._session = object()
             coordinator._vehicle_urn = "vehicle"
@@ -1951,6 +2061,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
         cls = coordinator_mod.HymerConnectCoordinator
 
         coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
         coordinator._slot_data = {(1, 1): 1}
         coordinator._slot_last_seen = {(1, 1): time.monotonic()}
         coordinator._entry_setup_complete = False

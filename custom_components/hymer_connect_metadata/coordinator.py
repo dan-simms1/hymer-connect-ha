@@ -121,8 +121,14 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._slot_last_seen: dict[tuple[int, int], float] = {}
         self._reconnect_backoff: int = _INITIAL_BACKOFF
         self._last_reconnect_attempt: float = 0.0
-        self._signalr_connected_at: float = 0.0  # monotonic ts of last successful connect
-        self._last_frame_at: float = 0.0  # monotonic ts of last slot frame
+        self._signalr_connected_at: float = 0.0  # monotonic ts of last connect attempt
+        # Connection generation, bumped before each client is started.  A
+        # timestamp comparison cannot stand in for this: the listen loop runs
+        # inside client.start(), so a legitimate first frame can be stamped
+        # before the connect timestamp is, and two monotonic reads can be
+        # equal at the clock's resolution.
+        self._signalr_generation: int = 0
+        self._frame_generation: int = 0  # generation that last delivered a frame
         self._consecutive_failures: int = 0
         self._last_rest_metadata_refresh: float = 0.0
         self._cached_rest_data: dict[str, Any] = {}
@@ -165,15 +171,24 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _on_signalr_update(
         self,
         slot_data: dict[tuple[int, int], Any],
+        generation: int | None = None,
     ) -> None:
-        """Handle incoming SignalR slot data."""
+        """Handle incoming SignalR slot data.
+
+        ``generation`` identifies the connection that produced the frame, so a
+        late callback from a superseded client cannot mark the current one as
+        proven live.  It defaults to the current generation for callers that
+        do not track one.
+        """
         previous_slots = set(self._slot_data)
         self._slot_data.update(slot_data)
         now = time.monotonic()
         # Marks this connection as proven live.  _slot_data itself cannot do
         # that job: it is never cleared, so it stays non-empty across every
         # reconnect and would report a brand-new session as already confirmed.
-        self._last_frame_at = now
+        self._frame_generation = (
+            self._signalr_generation if generation is None else generation
+        )
         for slot in slot_data:
             self._slot_last_seen[slot] = now
         new_slots = set(self._slot_data) - previous_slots
@@ -483,7 +498,18 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "SignalR reconnect after extended standby failed. "
                     "Try reloading the integration."
                 )
-            return client
+            # Settle here too, not only on the reconnect paths.  The client is
+            # published to self._signalr before start() is awaited, and the
+            # socket reports connected before UpdateTokens and subscriptions
+            # complete — so a command arriving mid-start would otherwise take
+            # this branch and skip confirmation entirely.  Once a frame has
+            # been seen this is a no-op.
+            settled = await self._settled_client_after_reconnect()
+            if settled is not None:
+                return settled
+            raise HomeAssistantError(
+                "SignalR is not connected. Try reloading the integration."
+            )
         _LOGGER.info(
             "SignalR not ready for %s — attempting reconnect before command",
             self.config_entry.title,
@@ -498,9 +524,10 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _frame_seen_on_current_connection(self) -> bool:
         """Return True once this SignalR session has delivered a slot frame."""
-        if not self._signalr_connected_at or not self._last_frame_at:
-            return False
-        return self._last_frame_at >= self._signalr_connected_at
+        return (
+            self._signalr_generation > 0
+            and self._frame_generation == self._signalr_generation
+        )
 
     async def _await_subscription_confirmation(self) -> None:
         """Briefly wait for the first frame after a reconnect before sending.
@@ -549,18 +576,18 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def _settled_client_after_reconnect(self) -> HymerSignalRClient | None:
-        """Return a usable client once a fresh connection has settled.
+        """Return a usable client once the connection has settled.
 
-        Returns None if the connection did not survive the wait — the client
-        can be swapped or dropped while we sleep, so it is re-read afterwards
-        rather than trusting the reference we started with.
+        Returns None if the connection did not survive the wait, or if it was
+        replaced while we slept — returning a replacement would hand back a
+        client this wait never applied to.  The caller's retry settles that
+        one properly.
         """
         client = self._signalr
         if not (client and client.connected):
             return None
         await self._await_subscription_confirmation()
-        client = self._signalr
-        if not (client and client.connected):
+        if self._signalr is not client or not client.connected:
             return None
         return client
 
@@ -799,13 +826,23 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.info("Stopping stale SignalR client before reconnect")
                 await self._stop_signalr_locked()
 
+            # Open the generation before starting: client.start() spawns the
+            # listen loop and sends the subscriptions, so frames can arrive
+            # before it returns.  Those frames belong to this connection and
+            # must count as proof it is live.
+            self._signalr_generation += 1
+            generation = self._signalr_generation
+            self._signalr_connected_at = time.monotonic()
+
             client = HymerSignalRClient(
                 api=self.api,
                 session=self._session,
                 vehicle_urn=self._vehicle_urn,
                 scu_urn=self._scu_urn,
                 ehg_refresh_token=self._ehg_refresh_token,
-                on_sensor_update=self._on_signalr_update,
+                on_sensor_update=lambda slot_data: self._on_signalr_update(
+                    slot_data, generation
+                ),
                 on_connection_lost=self._on_signalr_connection_lost,
                 known_slots=set(all_slots()),
             )
@@ -817,7 +854,6 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Reset backoff/failure state on successful connection.
                 self._reconnect_backoff = _INITIAL_BACKOFF
                 self._consecutive_failures = 0
-                self._signalr_connected_at = time.monotonic()
             except HymerConnectApiError as err:
                 self._consecutive_failures += 1
                 _LOGGER.warning(
