@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.25] - 2026-08-15
+
+### Added
+
+- **SignalR keepalive poll.** The SCU stops publishing after a few minutes of
+  silence, stranding every entity on its last value. `build_refresh_command()`
+  already existed but was dead code — nothing called it. The coordinator now
+  sends it from its update cycle.
+
+  In practice that cycle fires roughly a minute after the *last push* rather
+  than on a fixed interval, because every push calls `async_set_updated_data()`
+  and resets the timer. That suits a keepalive well: it prods the SCU exactly
+  when the stream goes quiet and stays silent while data flows. Measured in the
+  field at 59-61s after the last push.
+
+  The poll is fire-and-forget. `send_pia_request()` awaits a completion future,
+  and a poll is not reliably answered, so routing it there would stall the
+  coordinator for `PIA_REQUEST_TIMEOUT` every cycle. Its request ids come from a
+  reserved band above the app's 1..10,000,000 space, so a late response cannot
+  resolve a command's pending future and report an unacknowledged vehicle write
+  as successful.
+
+- **Proactive session-auth renewal**, on a timer independent of the coordinator.
+  It cannot ride the coordinator's cycle: while the SCU streams, that cycle can
+  be deferred well past the credential's lifetime.
+
+  It is the OAuth2 access token that lapses mid-session, not the EHG remote
+  token. Measured: `STATUS_AUTH_TOKEN_EXPIRED` arrived every ~31 minutes, so
+  renewal runs at 24 minutes via the path that also refreshes OAuth2.
+
+- **Post-reconnect subscription confirmation.** Commands sent while the SCU is
+  still processing subscriptions are silently dropped, so a command waits
+  briefly for a frame proving this connection is live. Keyed on a connection
+  generation rather than on "is there any slot data", since slot data is never
+  cleared and survives every reconnect.
+
+### Fixed
+
+- A failed keepalive write now marks the transport disconnected and hands over
+  to the reconnect loop, as the command path already did. The keepalive is the
+  session's liveness probe, so swallowing its failure defeated the purpose.
+- `UpdateTokens` freshness is tracked as separate attempt and success
+  timestamps. Stamping on send meant a rejected or timed-out refresh looked
+  healthy and suppressed recovery for a full interval.
+- Renewal attempts are rate-limited, with the attempt stamped at scheduling
+  time — the token exchange can fail before anything is sent, which left the
+  timestamp unset and defeated the backoff.
+
 ## [1.0.24] - 2026-08-14
 
 ### Fixed

@@ -6,6 +6,10 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
+- `1.0.25` — keeps the SignalR session alive between pushes: a keepalive poll
+  so the SCU does not fall silent, session-auth renewal on a timer independent
+  of the coordinator, and a post-reconnect wait so commands are not sent into a
+  window where the SCU drops them.
 - `1.0.24` — fixes fuel level reporting 0% for a full tank (a spurious
   `invert100` transform on the `FuelTankLevel` slots). Existing installs must
   regenerate their metadata pack, or hand-edit `data/sensor_labels.json`, to
