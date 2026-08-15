@@ -52,8 +52,16 @@ STANDBY_WAKE_RESUBSCRIBE_DELAY = 0.75
 # rather than waiting for a command to fail and recover reactively.
 UPDATE_TOKENS_INTERVAL = 15 * 60
 # Minimum gap between renewal attempts once one is overdue, so a persistently
-# failing renewal does not run a token exchange on every 60s poll.
+# failing renewal does not run a token exchange on every check.
 UPDATE_TOKENS_RETRY_INTERVAL = 5 * 60
+# How often the renewal timer wakes to see whether a renewal is due.  This
+# runs on its own clock rather than off the coordinator's update cycle: the
+# coordinator calls async_set_updated_data() on every SignalR push, which
+# resets its refresh timer, so while the SCU is streaming its update never
+# fires.  Measured in the field: polls landed 59-61s after the *last push*,
+# not every 60s, and a renewal due at 900s did not run until 955s.  Under a
+# busy stream the token could expire before renewal ever ran.
+TOKEN_RENEWAL_CHECK_INTERVAL = 60
 
 # After this long in 12V standby the server-side hub->SCU command routing
 # goes stale: outbound commands are silently dropped even though the
@@ -127,6 +135,10 @@ class HymerSignalRClient:
         self._token_refresh_task: asyncio.Task | None = None
         self._standby_wake_refresh_task: asyncio.Task | None = None
         self._standby_entry_refresh_task: asyncio.Task | None = None
+        # Deliberately NOT part of _refresh_in_flight(): this runs for the
+        # life of the connection, so counting it there would make that guard
+        # permanently true and suppress every keepalive poll.
+        self._token_renewal_task: asyncio.Task | None = None
         self._known_slots = frozenset(known_slots or ())
 
     @property
@@ -760,6 +772,14 @@ class HymerSignalRClient:
                     pass
                 finally:
                     self._standby_entry_refresh_task = None
+            if self._token_renewal_task is not None:
+                self._token_renewal_task.cancel()
+                try:
+                    await self._token_renewal_task
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    self._token_renewal_task = None
             err = HymerConnectApiError("SignalR connection closed")
             for future in self._completion_futures.values():
                 if not future.done():
@@ -776,9 +796,15 @@ class HymerSignalRClient:
         """Poll the SCU so it keeps publishing sensor data.
 
         The SCU stops pushing updates after a few minutes of silence, so the
-        coordinator calls this once per poll interval.  This also refreshes
-        the EHG access token every ``UPDATE_TOKENS_INTERVAL``, ahead of the
-        expiry that would otherwise cause commands to be dropped.
+        coordinator calls this from its update cycle.  In practice that cycle
+        fires roughly a minute after the *last push* rather than on a fixed
+        interval, because every push calls async_set_updated_data() and resets
+        the timer — which suits a keepalive well: it prods the SCU exactly
+        when the stream goes quiet, and stays silent while data flows.
+
+        Token renewal deliberately does not happen here.  It is owned by
+        :meth:`_run_token_renewal` on an independent clock, precisely because
+        this one can be deferred indefinitely by a busy stream.
 
         Deliberately fire-and-forget.  A poll is not reliably answered with a
         matching PiaResponse, so routing it through :meth:`send_pia_request`
@@ -791,8 +817,6 @@ class HymerSignalRClient:
         """
         if not self.connected:
             return
-
-        self._maybe_renew_access_token()
 
         if self._refresh_in_flight():
             # Bounded: every refresh path completes or times out, so at most a
@@ -843,6 +867,54 @@ class HymerSignalRClient:
             )
             self._connected = False
             self._notify_connection_lost()
+
+    async def _run_token_renewal(self) -> None:
+        """Check on our own clock whether the access token needs renewing.
+
+        Cannot be driven from the coordinator's update cycle: that cycle calls
+        async_set_updated_data() on every SignalR push, which resets its
+        refresh timer, so while the SCU streams it may not fire for far longer
+        than the token's lifetime.
+        """
+        try:
+            while self._running:
+                await asyncio.sleep(TOKEN_RENEWAL_CHECK_INTERVAL)
+                if not self._running:
+                    return
+                if not self.connected:
+                    continue
+                try:
+                    self._maybe_renew_access_token()
+                except Exception:
+                    _LOGGER.warning(
+                        "Token renewal check failed for %s",
+                        self._vehicle_urn,
+                        exc_info=True,
+                    )
+        except asyncio.CancelledError:
+            raise
+
+    def _clear_token_renewal_task(self, task: asyncio.Task) -> None:
+        """Drop the renewal-timer reference once it finishes."""
+        if self._token_renewal_task is task:
+            self._token_renewal_task = None
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            _LOGGER.warning(
+                "Token renewal timer stopped for %s",
+                self._vehicle_urn,
+                exc_info=exc,
+            )
+
+    def _start_token_renewal(self) -> None:
+        """Start the renewal timer, replacing any previous one."""
+        if self._token_renewal_task is not None and not self._token_renewal_task.done():
+            self._token_renewal_task.cancel()
+        task = asyncio.create_task(self._run_token_renewal())
+        task.add_done_callback(self._clear_token_renewal_task)
+        self._token_renewal_task = task
 
     def _maybe_renew_access_token(self) -> None:
         """Schedule an EHG access-token renewal if one is due.
@@ -1068,6 +1140,7 @@ class HymerSignalRClient:
             if not await self._send_update_tokens(wait_response=True):
                 raise HymerConnectApiError("UpdateTokens failed")
             await self._send_initial_subscriptions()
+            self._start_token_renewal()
         except Exception:
             await self.stop()
             raise
@@ -1096,6 +1169,13 @@ class HymerSignalRClient:
             except asyncio.CancelledError:
                 pass
         self._standby_entry_refresh_task = None
+        if self._token_renewal_task and not self._token_renewal_task.done():
+            self._token_renewal_task.cancel()
+            try:
+                await self._token_renewal_task
+            except asyncio.CancelledError:
+                pass
+        self._token_renewal_task = None
         if self._ws and not self._ws.closed:
             await self._ws.close()
         if self._task and not self._task.done():

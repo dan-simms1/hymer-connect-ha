@@ -1148,7 +1148,13 @@ class GeneratorAndEntityTests(unittest.TestCase):
             vehicle_urn="vehicle",
             scu_urn="scu",
         )
-        client._ws = type("WS", (), {"closed": False})()
+        class WS:
+            closed = False
+
+            async def close(self) -> None:
+                self.closed = True
+
+        client._ws = WS()
         client._connected = True
         return client
 
@@ -1215,7 +1221,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         asyncio.run(run_test())
 
-    def test_send_refresh_renews_update_tokens_once_past_interval(self) -> None:
+    def test_renewal_runs_on_its_own_clock_not_the_poll(self) -> None:
         ensure_package_paths()
         signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
         cls = signalr_mod.HymerSignalRClient
@@ -1237,18 +1243,74 @@ class GeneratorAndEntityTests(unittest.TestCase):
                 lambda status, request_id: scheduled.append(status)
             )
 
-            # Recently confirmed: left alone, and the poll still goes out.
-            client._last_update_tokens_success = time.monotonic()
+            # Overdue, but the poll path must not renew: the coordinator's
+            # cycle is reset by every SignalR push, so while the SCU streams
+            # it can be deferred well past the token's lifetime.  Renewal is
+            # owned by the independent timer instead.
+            client._last_update_tokens_success = time.monotonic() - (interval + 1)
             await client.send_refresh()
             self.assertEqual(scheduled, [])
             self.assertEqual(len(sent), 1)
 
-            # Past the interval: renewal is scheduled on the shared refresh
-            # task rather than awaited inline, so the coordinator is never
-            # blocked on the HTTP token exchange.
-            client._last_update_tokens_success = time.monotonic() - (interval + 1)
-            await client.send_refresh()
+            # The timer's check is what renews.
+            client._maybe_renew_access_token()
             self.assertEqual(scheduled, [signalr_mod.STATUS_REMOTE_TOKEN_EXPIRED])
+
+        asyncio.run(run_test())
+
+    def test_token_renewal_timer_runs_while_stream_is_busy(self) -> None:
+        ensure_package_paths()
+        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
+        cls = signalr_mod.HymerSignalRClient
+
+        import asyncio
+
+        async def run_test() -> None:
+            client = self._connected_signalr_client(cls)
+            client._running = True
+            checks: list[int] = []
+            client._maybe_renew_access_token = lambda: checks.append(1)
+
+            # The timer must tick without any coordinator involvement at all —
+            # send_refresh() is never called here.
+            with mock.patch.object(
+                signalr_mod, "TOKEN_RENEWAL_CHECK_INTERVAL", 0.01
+            ):
+                client._start_token_renewal()
+                await asyncio.sleep(0.06)
+                self.assertGreaterEqual(len(checks), 2)
+
+                # And it is torn down with the connection rather than
+                # outliving its client.
+                await client.stop()
+                self.assertIsNone(client._token_renewal_task)
+                settled = len(checks)
+                await asyncio.sleep(0.03)
+                self.assertEqual(len(checks), settled)
+
+        asyncio.run(run_test())
+
+    def test_renewal_timer_is_not_counted_as_a_refresh_in_flight(self) -> None:
+        ensure_package_paths()
+        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
+        cls = signalr_mod.HymerSignalRClient
+
+        import asyncio
+
+        async def run_test() -> None:
+            client = self._connected_signalr_client(cls)
+            client._running = True
+            with mock.patch.object(
+                signalr_mod, "TOKEN_RENEWAL_CHECK_INTERVAL", 60
+            ):
+                client._start_token_renewal()
+                try:
+                    # The renewal timer lives for the whole connection.  If it
+                    # counted as an in-flight refresh, that guard would be
+                    # permanently true and suppress every keepalive poll.
+                    self.assertFalse(client._refresh_in_flight())
+                finally:
+                    await client.stop()
 
         asyncio.run(run_test())
 
@@ -1402,13 +1464,14 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
             for _ in range(3):
                 await client.send_refresh()
+                client._maybe_renew_access_token()
 
             # An earlier revision returned straight after scheduling renewal,
             # so a renewal that never succeeded silently suppressed every
             # telemetry poll from then on — defeating the keepalive entirely.
             self.assertEqual(len(polls), 3)
             # And the failing renewal is rate-limited rather than re-run on
-            # every 60s cycle.
+            # every check.
             self.assertEqual(len(renewals), 1)
 
         asyncio.run(run_test())
