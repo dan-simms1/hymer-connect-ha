@@ -46,11 +46,19 @@ PIA_REQUEST_TIMEOUT = 30.0
 STANDBY_WAKE_UPDATE_TOKENS_DELAY = 3.0
 STANDBY_WAKE_RESUBSCRIBE_DELAY = 0.75
 
-# The ehgAccessToken sent in UpdateTokens expires after roughly 30 minutes.
-# Once it lapses the SCU silently drops commands even though the WebSocket
-# and subscription stream still look healthy, so refresh well ahead of it
-# rather than waiting for a command to fail and recover reactively.
-UPDATE_TOKENS_INTERVAL = 15 * 60
+# It is the OAuth2 access token that lapses in a live session, not the EHG
+# remote token.  Measured in the field: the SCU returned
+# STATUS_AUTH_TOKEN_EXPIRED at 08:29:04, 09:00:22, 09:31:38, 10:03:06 and
+# 10:34:03 — a metronomic ~31 minutes.  Renew at 24 minutes to stay comfortably
+# ahead of that, rather than letting a user's command be the thing that
+# discovers the token expired.
+#
+# An earlier revision renewed every 15 minutes via the STATUS_REMOTE_TOKEN_EXPIRED
+# path, which re-mints the EHG token and re-sends UpdateTokens but deliberately
+# skips the OAuth2 refresh.  It therefore refreshed the wrong token: the ~31
+# minute expiry cadence was completely unaffected by renewals landing between
+# the expiries.
+UPDATE_TOKENS_INTERVAL = 24 * 60
 # Minimum gap between renewal attempts once one is overdue, so a persistently
 # failing renewal does not run a token exchange on every check.
 UPDATE_TOKENS_RETRY_INTERVAL = 5 * 60
@@ -947,7 +955,7 @@ class HymerSignalRClient:
             return
 
         _LOGGER.info(
-            "EHG access token last confirmed %.0fs ago for %s — renewing",
+            "Session auth last confirmed %.0fs ago for %s — renewing ahead of expiry",
             now - self._last_update_tokens_success,
             self._vehicle_urn,
         )
@@ -955,10 +963,11 @@ class HymerSignalRClient:
         # the renewal can fail in the token exchange before anything is sent,
         # which would leave the timestamp unset and defeat the backoff above.
         self._last_update_tokens_attempt = now
-        # Same operation as the expiry-driven path: re-send UpdateTokens and
-        # replay anything queued behind it.  STATUS_REMOTE_TOKEN_EXPIRED
-        # selects that behaviour without also re-running the OAuth2 refresh.
-        self._schedule_token_refresh_retry(STATUS_REMOTE_TOKEN_EXPIRED, None)
+        # STATUS_AUTH_TOKEN_EXPIRED, not STATUS_REMOTE_TOKEN_EXPIRED: only this
+        # path also refreshes the OAuth2 access token, which is the credential
+        # that actually lapses mid-session.  Renewing the EHG token alone left
+        # the observed ~31 minute expiry cadence untouched.
+        self._schedule_token_refresh_retry(STATUS_AUTH_TOKEN_EXPIRED, None)
 
     def _refresh_in_flight(self) -> bool:
         """Return True while any auth-refresh task is still running.

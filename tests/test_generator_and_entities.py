@@ -1252,9 +1252,12 @@ class GeneratorAndEntityTests(unittest.TestCase):
             self.assertEqual(scheduled, [])
             self.assertEqual(len(sent), 1)
 
-            # The timer's check is what renews.
+            # The timer's check is what renews — and via the OAuth2 path, since
+            # that is the credential which actually lapses mid-session.
+            # Renewing the EHG token alone left the observed ~31 minute expiry
+            # cadence untouched in the field.
             client._maybe_renew_access_token()
-            self.assertEqual(scheduled, [signalr_mod.STATUS_REMOTE_TOKEN_EXPIRED])
+            self.assertEqual(scheduled, [signalr_mod.STATUS_AUTH_TOKEN_EXPIRED])
 
         asyncio.run(run_test())
 
