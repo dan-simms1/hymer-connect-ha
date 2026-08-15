@@ -823,6 +823,14 @@ class HymerSignalRClient:
             return
         try:
             await self._send_request_payload(request_id, payload)
+            # Logged so the keepalive is observable in the field: without it a
+            # working poll is silent, and "data still flowing" cannot be told
+            # apart from "the SCU happened to be awake anyway".
+            _LOGGER.debug(
+                "Keepalive poll sent for %s (request_id=%s)",
+                self._vehicle_urn,
+                request_id,
+            )
         except Exception:
             # The keepalive is the liveness probe for this session, so a write
             # failure is evidence the transport is gone.  Swallowing it would
