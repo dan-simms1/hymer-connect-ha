@@ -1168,7 +1168,6 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         async def run_test() -> None:
             client = self._connected_signalr_client(cls)
-            client._last_update_tokens_success = time.monotonic()
             sent: list[str] = []
 
             async def fake_send_payload(request_id: int, payload: str) -> None:
@@ -1204,7 +1203,6 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         async def run_test() -> None:
             client = self._connected_signalr_client(cls)
-            client._last_update_tokens_success = time.monotonic()
             client._scu_standby_since = time.monotonic()
             sent: list[str] = []
 
@@ -1221,132 +1219,6 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         asyncio.run(run_test())
 
-    def test_renewal_runs_on_its_own_clock_not_the_poll(self) -> None:
-        ensure_package_paths()
-        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
-        cls = signalr_mod.HymerSignalRClient
-        interval = signalr_mod.UPDATE_TOKENS_INTERVAL
-
-        import asyncio
-
-        async def run_test() -> None:
-            client = self._connected_signalr_client(cls)
-            sent: list[str] = []
-
-            async def fake_send_payload(request_id: int, payload: str) -> None:
-                sent.append(payload)
-
-            client._send_request_payload = fake_send_payload
-
-            scheduled: list[int] = []
-            client._schedule_token_refresh_retry = (
-                lambda status, request_id: scheduled.append(status)
-            )
-
-            # Overdue, but the poll path must not renew: the coordinator's
-            # cycle is reset by every SignalR push, so while the SCU streams
-            # it can be deferred well past the token's lifetime.  Renewal is
-            # owned by the independent timer instead.
-            client._last_update_tokens_success = time.monotonic() - (interval + 1)
-            await client.send_refresh()
-            self.assertEqual(scheduled, [])
-            self.assertEqual(len(sent), 1)
-
-            # The timer's check is what renews — and via the OAuth2 path, since
-            # that is the credential which actually lapses mid-session.
-            # Renewing the EHG token alone left the observed ~31 minute expiry
-            # cadence untouched in the field.
-            client._maybe_renew_access_token()
-            self.assertEqual(scheduled, [signalr_mod.STATUS_AUTH_TOKEN_EXPIRED])
-
-        asyncio.run(run_test())
-
-    def test_token_renewal_timer_runs_while_stream_is_busy(self) -> None:
-        ensure_package_paths()
-        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
-        cls = signalr_mod.HymerSignalRClient
-
-        import asyncio
-
-        async def run_test() -> None:
-            client = self._connected_signalr_client(cls)
-            client._running = True
-            checks: list[int] = []
-            client._maybe_renew_access_token = lambda: checks.append(1)
-
-            # The timer must tick without any coordinator involvement at all —
-            # send_refresh() is never called here.
-            with mock.patch.object(
-                signalr_mod, "TOKEN_RENEWAL_CHECK_INTERVAL", 0.01
-            ):
-                client._start_token_renewal()
-                await asyncio.sleep(0.06)
-                self.assertGreaterEqual(len(checks), 2)
-
-                # And it is torn down with the connection rather than
-                # outliving its client.
-                await client.stop()
-                self.assertIsNone(client._token_renewal_task)
-                settled = len(checks)
-                await asyncio.sleep(0.03)
-                self.assertEqual(len(checks), settled)
-
-        asyncio.run(run_test())
-
-    def test_renewal_timer_is_not_counted_as_a_refresh_in_flight(self) -> None:
-        ensure_package_paths()
-        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
-        cls = signalr_mod.HymerSignalRClient
-
-        import asyncio
-
-        async def run_test() -> None:
-            client = self._connected_signalr_client(cls)
-            client._running = True
-            with mock.patch.object(
-                signalr_mod, "TOKEN_RENEWAL_CHECK_INTERVAL", 60
-            ):
-                client._start_token_renewal()
-                try:
-                    # The renewal timer lives for the whole connection.  If it
-                    # counted as an in-flight refresh, that guard would be
-                    # permanently true and suppress every keepalive poll.
-                    self.assertFalse(client._refresh_in_flight())
-                finally:
-                    await client.stop()
-
-        asyncio.run(run_test())
-
-    def test_send_refresh_skips_token_renewal_before_first_success(self) -> None:
-        ensure_package_paths()
-        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
-        cls = signalr_mod.HymerSignalRClient
-
-        import asyncio
-
-        async def run_test() -> None:
-            client = self._connected_signalr_client(cls)
-            sent: list[str] = []
-
-            async def fake_send_payload(request_id: int, payload: str) -> None:
-                sent.append(payload)
-
-            client._send_request_payload = fake_send_payload
-
-            scheduled: list[int] = []
-            client._schedule_token_refresh_retry = (
-                lambda status, request_id: scheduled.append(status)
-            )
-
-            # _last_update_tokens_success is 0 until a refresh is confirmed;
-            # that huge apparent age must not trigger a spurious renewal.
-            # The keepalive poll itself is still sent.
-            await client.send_refresh()
-            self.assertEqual(scheduled, [])
-            self.assertEqual(len(sent), 1)
-
-        asyncio.run(run_test())
-
     def test_send_refresh_marks_disconnected_when_write_fails(self) -> None:
         ensure_package_paths()
         signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
@@ -1357,7 +1229,6 @@ class GeneratorAndEntityTests(unittest.TestCase):
         async def run_test() -> None:
             lost: list[int] = []
             client = self._connected_signalr_client(cls)
-            client._last_update_tokens_success = time.monotonic()
             client._on_connection_lost = lambda: lost.append(1)
 
             async def failing_send(request_id: int, payload: str) -> None:
@@ -1388,7 +1259,6 @@ class GeneratorAndEntityTests(unittest.TestCase):
                 "_standby_entry_refresh_task",
             ):
                 client = self._connected_signalr_client(cls)
-                client._last_update_tokens_success = time.monotonic()
                 sent: list[str] = []
 
                 async def fake_send_payload(request_id: int, payload: str) -> None:
@@ -1440,97 +1310,6 @@ class GeneratorAndEntityTests(unittest.TestCase):
                 pia_decoder.build_light_command(3, 1, bool_value=True)
             )
             self.assertLessEqual(command_id, pia_decoder._APP_REQUEST_ID_MAX)
-
-    def test_failed_token_renewal_does_not_starve_keepalive_polls(self) -> None:
-        ensure_package_paths()
-        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
-        cls = signalr_mod.HymerSignalRClient
-
-        import asyncio
-
-        async def run_test() -> None:
-            client = self._connected_signalr_client(cls)
-            # Overdue, and every renewal fails so success never advances.
-            client._last_update_tokens_success = (
-                time.monotonic() - signalr_mod.UPDATE_TOKENS_INTERVAL - 1
-            )
-            polls: list[str] = []
-            renewals: list[int] = []
-
-            async def fake_send(request_id: int, payload: str) -> None:
-                polls.append(payload)
-
-            client._send_request_payload = fake_send
-            client._schedule_token_refresh_retry = (
-                lambda status, request_id: renewals.append(status)
-            )
-
-            for _ in range(3):
-                await client.send_refresh()
-                client._maybe_renew_access_token()
-
-            # An earlier revision returned straight after scheduling renewal,
-            # so a renewal that never succeeded silently suppressed every
-            # telemetry poll from then on — defeating the keepalive entirely.
-            self.assertEqual(len(polls), 3)
-            # And the failing renewal is rate-limited rather than re-run on
-            # every check.
-            self.assertEqual(len(renewals), 1)
-
-        asyncio.run(run_test())
-
-    def test_update_tokens_success_only_stamped_on_accepted_completion(self) -> None:
-        ensure_package_paths()
-        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
-        cls = signalr_mod.HymerSignalRClient
-
-        import asyncio
-
-        class Api:
-            access_token = "oauth-access"
-
-            async def get_remote_access_token(
-                self, vehicle_urn: str, refresh_token: str
-            ) -> str:
-                return "remote-access"
-
-        async def run_test() -> None:
-            for accepted in (False, True):
-                client = cls(
-                    api=Api(),
-                    session=object(),
-                    vehicle_urn="vehicle",
-                    scu_urn="scu",
-                    ehg_refresh_token="refresh",
-                )
-
-                class WS:
-                    closed = False
-
-                    async def send_str(self, raw: str) -> None:
-                        message = json.loads(
-                            raw.split(signalr_mod.SIGNALR_RECORD_SEPARATOR)[0]
-                        )
-                        invocation_id = message["invocationId"]
-                        future = client._completion_futures.get(invocation_id)
-                        if future is not None and not future.done():
-                            future.set_result(accepted)
-
-                client._ws = WS()
-                client._connected = True
-
-                ok = await client._send_update_tokens(wait_response=True)
-
-                self.assertEqual(ok, accepted)
-                self.assertGreater(client._last_update_tokens_attempt, 0)
-                if accepted:
-                    self.assertGreater(client._last_update_tokens_success, 0)
-                else:
-                    # A rejected refresh must not look healthy, or periodic
-                    # recovery stays suppressed for a full interval.
-                    self.assertEqual(client._last_update_tokens_success, 0.0)
-
-        asyncio.run(run_test())
 
     def test_restart_system_request_matches_app_command_shape(self) -> None:
         ensure_package_paths()

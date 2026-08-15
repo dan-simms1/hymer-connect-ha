@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.26] - 2026-08-15
+
+### Removed
+
+- **Proactive session-auth renewal**, added in 1.0.25 and never released.
+  Measured against a live vehicle it never delivered, in two distinct ways:
+
+  1. The first version renewed the EHG remote token via the
+     `STATUS_REMOTE_TOKEN_EXPIRED` path. That is not the credential which
+     lapses mid-session, so the observed expiry cadence was untouched by
+     renewals landing between the expiries.
+  2. The second targeted the right credential but used a fixed 24 minute
+     interval, chosen from an observed ~31 minute expiry gap. That gap then
+     moved to ~16 minutes within the same morning. Since each reactive refresh
+     resets the freshness clock, any threshold longer than the expiry gap can
+     never be reached — the timer would wake every 60s and do nothing,
+     permanently.
+
+  The reactive path handles expiry correctly and was observed doing so seven
+  times in a morning with no errors and no lost commands: the SCU answers with
+  `STATUS_AUTH_TOKEN_EXPIRED`, OAuth2 and `UpdateTokens` are refreshed, and
+  queued requests are replayed. The keepalive poll added in 1.0.25 also draws
+  that status while the session is otherwise idle, so a user's command is not
+  what discovers the expiry — which was the original justification for renewing
+  proactively.
+
+  Rather than guess a third interval against a moving target, the timer, its
+  three constants and the attempt/success timestamps are gone.
+
 ## [1.0.25] - 2026-08-15
 
 ### Added
@@ -29,13 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolve a command's pending future and report an unacknowledged vehicle write
   as successful.
 
-- **Proactive session-auth renewal**, on a timer independent of the coordinator.
-  It cannot ride the coordinator's cycle: while the SCU streams, that cycle can
-  be deferred well past the credential's lifetime.
-
-  It is the OAuth2 access token that lapses mid-session, not the EHG remote
-  token. Measured: `STATUS_AUTH_TOKEN_EXPIRED` arrived every ~31 minutes, so
-  renewal runs at 24 minutes via the path that also refreshes OAuth2.
+- **Proactive session-auth renewal**, on a timer independent of the
+  coordinator. **Removed again in 1.0.26 before either version was released —
+  see that entry for why it could not work.**
 
 - **Post-reconnect subscription confirmation.** Commands sent while the SCU is
   still processing subscriptions are silently dropped, so a command waits
@@ -48,12 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A failed keepalive write now marks the transport disconnected and hands over
   to the reconnect loop, as the command path already did. The keepalive is the
   session's liveness probe, so swallowing its failure defeated the purpose.
-- `UpdateTokens` freshness is tracked as separate attempt and success
-  timestamps. Stamping on send meant a rejected or timed-out refresh looked
-  healthy and suppressed recovery for a full interval.
-- Renewal attempts are rate-limited, with the attempt stamped at scheduling
-  time — the token exchange can fail before anything is sent, which left the
-  timestamp unset and defeated the backoff.
+  (The renewal-timestamp and rate-limiting fixes that also landed here went
+  with the renewal itself in 1.0.26.)
 
 ## [1.0.24] - 2026-08-14
 

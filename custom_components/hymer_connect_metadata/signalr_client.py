@@ -46,30 +46,19 @@ PIA_REQUEST_TIMEOUT = 30.0
 STANDBY_WAKE_UPDATE_TOKENS_DELAY = 3.0
 STANDBY_WAKE_RESUBSCRIBE_DELAY = 0.75
 
-# It is the OAuth2 access token that lapses in a live session, not the EHG
-# remote token.  Measured in the field: the SCU returned
-# STATUS_AUTH_TOKEN_EXPIRED at 08:29:04, 09:00:22, 09:31:38, 10:03:06 and
-# 10:34:03 — a metronomic ~31 minutes.  Renew at 24 minutes to stay comfortably
-# ahead of that, rather than letting a user's command be the thing that
-# discovers the token expired.
+# Session auth is refreshed reactively: the SCU answers a request with
+# STATUS_AUTH_TOKEN_EXPIRED, _schedule_token_refresh_retry() renews the OAuth2
+# token plus UpdateTokens, and anything queued behind it is replayed.
 #
-# An earlier revision renewed every 15 minutes via the STATUS_REMOTE_TOKEN_EXPIRED
-# path, which re-mints the EHG token and re-sends UpdateTokens but deliberately
-# skips the OAuth2 refresh.  It therefore refreshed the wrong token: the ~31
-# minute expiry cadence was completely unaffected by renewals landing between
-# the expiries.
-UPDATE_TOKENS_INTERVAL = 24 * 60
-# Minimum gap between renewal attempts once one is overdue, so a persistently
-# failing renewal does not run a token exchange on every check.
-UPDATE_TOKENS_RETRY_INTERVAL = 5 * 60
-# How often the renewal timer wakes to see whether a renewal is due.  This
-# runs on its own clock rather than off the coordinator's update cycle: the
-# coordinator calls async_set_updated_data() on every SignalR push, which
-# resets its refresh timer, so while the SCU is streaming its update never
-# fires.  Measured in the field: polls landed 59-61s after the *last push*,
-# not every 60s, and a renewal due at 900s did not run until 955s.  Under a
-# busy stream the token could expire before renewal ever ran.
-TOKEN_RENEWAL_CHECK_INTERVAL = 60
+# There is deliberately no proactive renewal timer.  One was built and measured
+# against a live vehicle twice, and never delivered.  The first version renewed
+# the EHG remote token, which is not the credential that lapses, so the expiry
+# cadence was untouched.  The second targeted the right token but used a fixed
+# 24 minute interval, while the observed expiry gap moved from ~31 to ~16
+# minutes within a single morning — and because each reactive refresh resets
+# the freshness clock, a threshold longer than the expiry gap can never be
+# reached.  The keepalive poll already surfaces an expiry promptly while idle,
+# so a user's command is not what discovers it.
 
 # After this long in 12V standby the server-side hub->SCU command routing
 # goes stale: outbound commands are silently dropped even though the
@@ -129,11 +118,6 @@ class HymerSignalRClient:
         self._signalr_token: str = ""
         self._connected_at: float = 0.0  # monotonic timestamp of connection
         self._last_data_received: float = 0.0  # monotonic timestamp of last data
-        # Attempt and success are tracked separately: stamping only on send
-        # would let a rejected or timed-out UpdateTokens look like a healthy
-        # refresh and suppress recovery for a full interval.
-        self._last_update_tokens_attempt: float = 0.0
-        self._last_update_tokens_success: float = 0.0
         self._scu_standby_since: float = 0.0  # monotonic ts of standby entry
         self._connection_lost_notified = False
         self._completion_futures: dict[str, asyncio.Future[bool]] = {}
@@ -143,10 +127,6 @@ class HymerSignalRClient:
         self._token_refresh_task: asyncio.Task | None = None
         self._standby_wake_refresh_task: asyncio.Task | None = None
         self._standby_entry_refresh_task: asyncio.Task | None = None
-        # Deliberately NOT part of _refresh_in_flight(): this runs for the
-        # life of the connection, so counting it there would make that guard
-        # permanently true and suppress every keepalive poll.
-        self._token_renewal_task: asyncio.Task | None = None
         self._known_slots = frozenset(known_slots or ())
 
     @property
@@ -581,25 +561,18 @@ class HymerSignalRClient:
             future = asyncio.get_running_loop().create_future()
             self._completion_futures[invocation_id] = future
         await self._ws.send_str(json.dumps(msg) + SIGNALR_RECORD_SEPARATOR)
-        self._last_update_tokens_attempt = time.monotonic()
 
         if not wait_response:
-            # No completion is awaited, so this send can never advance the
-            # success clock — the periodic check keeps retrying until a
-            # confirmed refresh lands.
             _LOGGER.debug("UpdateTokens sent in fire-and-forget mode")
             return True
 
         try:
-            ok = await asyncio.wait_for(future, timeout=PIA_REQUEST_TIMEOUT)
+            return await asyncio.wait_for(future, timeout=PIA_REQUEST_TIMEOUT)
         except asyncio.TimeoutError:
             _LOGGER.warning("UpdateTokens timed out for %s", self._vehicle_urn)
             return False
         finally:
             self._completion_futures.pop(invocation_id, None)
-        if ok:
-            self._last_update_tokens_success = time.monotonic()
-        return ok
 
     def _handle_message(self, msg: dict[str, Any]) -> None:
         """Handle an incoming SignalR message."""
@@ -780,14 +753,6 @@ class HymerSignalRClient:
                     pass
                 finally:
                     self._standby_entry_refresh_task = None
-            if self._token_renewal_task is not None:
-                self._token_renewal_task.cancel()
-                try:
-                    await self._token_renewal_task
-                except asyncio.CancelledError:
-                    pass
-                finally:
-                    self._token_renewal_task = None
             err = HymerConnectApiError("SignalR connection closed")
             for future in self._completion_futures.values():
                 if not future.done():
@@ -810,9 +775,9 @@ class HymerSignalRClient:
         the timer — which suits a keepalive well: it prods the SCU exactly
         when the stream goes quiet, and stays silent while data flows.
 
-        Token renewal deliberately does not happen here.  It is owned by
-        :meth:`_run_token_renewal` on an independent clock, precisely because
-        this one can be deferred indefinitely by a busy stream.
+        A useful side effect: because the poll is a request, it draws the
+        SCU's STATUS_AUTH_TOKEN_EXPIRED while the session is otherwise idle,
+        so session auth is refreshed before a user's command meets the expiry.
 
         Deliberately fire-and-forget.  A poll is not reliably answered with a
         matching PiaResponse, so routing it through :meth:`send_pia_request`
@@ -828,10 +793,7 @@ class HymerSignalRClient:
 
         if self._refresh_in_flight():
             # Bounded: every refresh path completes or times out, so at most a
-            # cycle or two of polls is skipped.  The unbounded case — renewal
-            # never succeeding and suppressing polls forever — is prevented by
-            # _maybe_renew_access_token() no longer returning early and by its
-            # retry interval.
+            # cycle or two of polls is skipped.
             _LOGGER.debug(
                 "Auth refresh in progress for %s — skipping this poll",
                 self._vehicle_urn,
@@ -875,99 +837,6 @@ class HymerSignalRClient:
             )
             self._connected = False
             self._notify_connection_lost()
-
-    async def _run_token_renewal(self) -> None:
-        """Check on our own clock whether the access token needs renewing.
-
-        Cannot be driven from the coordinator's update cycle: that cycle calls
-        async_set_updated_data() on every SignalR push, which resets its
-        refresh timer, so while the SCU streams it may not fire for far longer
-        than the token's lifetime.
-        """
-        try:
-            while self._running:
-                await asyncio.sleep(TOKEN_RENEWAL_CHECK_INTERVAL)
-                if not self._running:
-                    return
-                if not self.connected:
-                    continue
-                try:
-                    self._maybe_renew_access_token()
-                except Exception:
-                    _LOGGER.warning(
-                        "Token renewal check failed for %s",
-                        self._vehicle_urn,
-                        exc_info=True,
-                    )
-        except asyncio.CancelledError:
-            raise
-
-    def _clear_token_renewal_task(self, task: asyncio.Task) -> None:
-        """Drop the renewal-timer reference once it finishes."""
-        if self._token_renewal_task is task:
-            self._token_renewal_task = None
-        if task.cancelled():
-            return
-        exc = task.exception()
-        if exc is not None:
-            _LOGGER.warning(
-                "Token renewal timer stopped for %s",
-                self._vehicle_urn,
-                exc_info=exc,
-            )
-
-    def _start_token_renewal(self) -> None:
-        """Start the renewal timer, replacing any previous one."""
-        if self._token_renewal_task is not None and not self._token_renewal_task.done():
-            self._token_renewal_task.cancel()
-        task = asyncio.create_task(self._run_token_renewal())
-        task.add_done_callback(self._clear_token_renewal_task)
-        self._token_renewal_task = task
-
-    def _maybe_renew_access_token(self) -> None:
-        """Schedule an EHG access-token renewal if one is due.
-
-        Scheduled rather than awaited: the renewal performs an HTTP token
-        exchange, and blocking here would stall the coordinator's update
-        cycle.  Routing it through the shared refresh task also means
-        in-flight commands are queued and replayed against the new token
-        instead of racing it.
-
-        Renewal never gates the poll.  An earlier revision returned here after
-        scheduling, which meant a renewal that kept failing — success never
-        advancing — suppressed every telemetry poll from then on, defeating
-        the keepalive entirely.
-        """
-        if not self._last_update_tokens_success:
-            # Nothing confirmed yet; connect-time UpdateTokens owns this.
-            return
-        now = time.monotonic()
-        if now - self._last_update_tokens_success < UPDATE_TOKENS_INTERVAL:
-            return
-        if self._refresh_in_flight():
-            return
-        if (
-            self._last_update_tokens_attempt
-            and now - self._last_update_tokens_attempt < UPDATE_TOKENS_RETRY_INTERVAL
-        ):
-            # Back off between attempts: without this a persistently failing
-            # renewal would run a token exchange on every poll.
-            return
-
-        _LOGGER.info(
-            "Session auth last confirmed %.0fs ago for %s — renewing ahead of expiry",
-            now - self._last_update_tokens_success,
-            self._vehicle_urn,
-        )
-        # Stamp the attempt here rather than relying on _send_update_tokens:
-        # the renewal can fail in the token exchange before anything is sent,
-        # which would leave the timestamp unset and defeat the backoff above.
-        self._last_update_tokens_attempt = now
-        # STATUS_AUTH_TOKEN_EXPIRED, not STATUS_REMOTE_TOKEN_EXPIRED: only this
-        # path also refreshes the OAuth2 access token, which is the credential
-        # that actually lapses mid-session.  Renewing the EHG token alone left
-        # the observed ~31 minute expiry cadence untouched.
-        self._schedule_token_refresh_retry(STATUS_AUTH_TOKEN_EXPIRED, None)
 
     def _refresh_in_flight(self) -> bool:
         """Return True while any auth-refresh task is still running.
@@ -1149,7 +1018,6 @@ class HymerSignalRClient:
             if not await self._send_update_tokens(wait_response=True):
                 raise HymerConnectApiError("UpdateTokens failed")
             await self._send_initial_subscriptions()
-            self._start_token_renewal()
         except Exception:
             await self.stop()
             raise
@@ -1178,13 +1046,6 @@ class HymerSignalRClient:
             except asyncio.CancelledError:
                 pass
         self._standby_entry_refresh_task = None
-        if self._token_renewal_task and not self._token_renewal_task.done():
-            self._token_renewal_task.cancel()
-            try:
-                await self._token_renewal_task
-            except asyncio.CancelledError:
-                pass
-        self._token_renewal_task = None
         if self._ws and not self._ws.closed:
             await self._ws.close()
         if self._task and not self._task.done():
