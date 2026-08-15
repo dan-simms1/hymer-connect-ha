@@ -63,6 +63,17 @@ _SUBSCRIPTION_GROUPS: tuple[tuple[int, str | None, tuple[int, ...]], ...] = (
 
 _APP_PROTOCOL_VERSION = "v0.32.0"
 
+# Every app-shaped request draws its id from 1..10,000,000.  The keepalive
+# poll is sent fire-and-forget, so its id is never registered in
+# _pending_requests — a late response bearing an id that a later command
+# happens to reuse would otherwise resolve that command's future and report
+# a vehicle write as successful when it was never acknowledged.  Drawing
+# keepalive ids from a disjoint band above the app range makes that
+# collision impossible, while keeping the same varint width on the wire.
+_APP_REQUEST_ID_MAX = 10_000_000
+_KEEPALIVE_REQUEST_ID_MIN = 10_000_001
+_KEEPALIVE_REQUEST_ID_MAX = 10_999_999
+
 
 # Cloud DataHub response statuses reverse-engineered from the app transport
 # protocol. Only the values used by the live SignalR path are named here.
@@ -141,11 +152,17 @@ def _build_subscription_request(
     *,
     topic_field_number: int,
     topic_payload: bytes,
+    request_id: int | None = None,
 ) -> str:
-    """Build a wrapped PiaRequest transport envelope for startup subscriptions."""
+    """Build a wrapped PiaRequest transport envelope for startup subscriptions.
+
+    ``request_id`` lets a caller draw from a reserved range; it defaults to the
+    app's own 1..10,000,000 space.
+    """
     import random
 
-    request_id = random.randint(1, 10_000_000)
+    if request_id is None:
+        request_id = random.randint(1, _APP_REQUEST_ID_MAX)
     timestamp = int(time.time())
 
     wrapper = _encode_varint_field(1, request_id)
@@ -201,8 +218,19 @@ def build_refresh_command() -> str:
     Carried on the same wrapped transport envelope as the subscription
     burst it accompanies — not the unwrapped ``_build_cloud_request``
     envelope used for command topics such as restart.
+
+    The request id comes from the reserved keepalive band so a late response
+    can never resolve a command's pending future.
     """
-    return _build_subscription_request(topic_field_number=9, topic_payload=b"")
+    import random
+
+    return _build_subscription_request(
+        topic_field_number=9,
+        topic_payload=b"",
+        request_id=random.randint(
+            _KEEPALIVE_REQUEST_ID_MIN, _KEEPALIVE_REQUEST_ID_MAX
+        ),
+    )
 
 
 def decode_pia_slots(

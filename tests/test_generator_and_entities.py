@@ -588,8 +588,11 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         coordinator = cls.__new__(cls)
         coordinator._signalr = None
-        coordinator._slot_data = {}
+        # Slot data survives reconnects, so a populated cache must NOT be
+        # mistaken for proof that the new session's subscriptions are live.
+        coordinator._slot_data = {(1, 1): "from previous connection"}
         coordinator._signalr_connected_at = time.monotonic()
+        coordinator._last_frame_at = 0.0
         coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
 
         async def start_signalr() -> None:
@@ -602,7 +605,8 @@ class GeneratorAndEntityTests(unittest.TestCase):
         async def run_test() -> None:
             async def deliver_first_frame() -> None:
                 await asyncio.sleep(0.2)
-                coordinator._slot_data[(1, 1)] = 1
+                coordinator._slot_data[(1, 1)] = "from this connection"
+                coordinator._last_frame_at = time.monotonic()
 
             frame = asyncio.create_task(deliver_first_frame())
             started = time.monotonic()
@@ -635,11 +639,13 @@ class GeneratorAndEntityTests(unittest.TestCase):
         coordinator = cls.__new__(cls)
         coordinator._signalr = None
         coordinator._slot_data = {(1, 1): 1}
-        coordinator._signalr_connected_at = time.monotonic()
         coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
 
         async def start_signalr() -> None:
             coordinator._signalr = Client()
+            # A frame has already landed on this connection.
+            coordinator._signalr_connected_at = time.monotonic()
+            coordinator._last_frame_at = time.monotonic()
 
         coordinator.start_signalr = start_signalr
 
@@ -729,6 +735,7 @@ class GeneratorAndEntityTests(unittest.TestCase):
         fresh = Client(0.0)
         coordinator = cls.__new__(cls)
         coordinator._signalr = stale
+        coordinator._slot_data = {(1, 1): 1}
         coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
 
         reauths: list[int] = []
@@ -736,6 +743,10 @@ class GeneratorAndEntityTests(unittest.TestCase):
         async def force_reauth_and_reconnect() -> None:
             reauths.append(1)
             coordinator._signalr = fresh
+            # The reconnected session is immediately live, so the settling
+            # wait this path now performs returns without delay.
+            coordinator._signalr_connected_at = time.monotonic()
+            coordinator._last_frame_at = time.monotonic()
 
         coordinator.force_reauth_and_reconnect = force_reauth_and_reconnect
 
@@ -1151,33 +1162,34 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         async def run_test() -> None:
             client = self._connected_signalr_client(cls)
+            sent: list[str] = []
 
             async def fake_send_payload(request_id: int, payload: str) -> None:
-                return None
+                sent.append(payload)
 
             client._send_request_payload = fake_send_payload
 
-            calls: list[bool] = []
+            scheduled: list[int] = []
+            client._schedule_token_refresh_retry = (
+                lambda status, request_id: scheduled.append(status)
+            )
 
-            async def fake_update_tokens(wait_response: bool = True) -> bool:
-                calls.append(wait_response)
-                return True
-
-            client._send_update_tokens = fake_update_tokens
-
-            # Fresh token: left alone.
-            client._last_update_tokens = time.monotonic()
+            # Recently confirmed: left alone, and the poll still goes out.
+            client._last_update_tokens_success = time.monotonic()
             await client.send_refresh()
-            self.assertEqual(calls, [])
+            self.assertEqual(scheduled, [])
+            self.assertEqual(len(sent), 1)
 
-            # Past the interval: renewed, without blocking on a response.
-            client._last_update_tokens = time.monotonic() - (interval + 1)
+            # Past the interval: renewal is scheduled on the shared refresh
+            # task rather than awaited inline, so the coordinator is never
+            # blocked on the HTTP token exchange.
+            client._last_update_tokens_success = time.monotonic() - (interval + 1)
             await client.send_refresh()
-            self.assertEqual(calls, [False])
+            self.assertEqual(scheduled, [signalr_mod.STATUS_REMOTE_TOKEN_EXPIRED])
 
         asyncio.run(run_test())
 
-    def test_send_refresh_is_noop_before_first_update_tokens(self) -> None:
+    def test_send_refresh_skips_token_renewal_before_first_success(self) -> None:
         ensure_package_paths()
         signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
         cls = signalr_mod.HymerSignalRClient
@@ -1186,24 +1198,162 @@ class GeneratorAndEntityTests(unittest.TestCase):
 
         async def run_test() -> None:
             client = self._connected_signalr_client(cls)
+            sent: list[str] = []
 
             async def fake_send_payload(request_id: int, payload: str) -> None:
-                return None
+                sent.append(payload)
 
             client._send_request_payload = fake_send_payload
 
-            calls: list[bool] = []
+            scheduled: list[int] = []
+            client._schedule_token_refresh_retry = (
+                lambda status, request_id: scheduled.append(status)
+            )
 
-            async def fake_update_tokens(wait_response: bool = True) -> bool:
-                calls.append(wait_response)
-                return True
-
-            client._send_update_tokens = fake_update_tokens
-
-            # _last_update_tokens is 0 until the first UpdateTokens is sent;
-            # a huge apparent age must not trigger a spurious refresh.
+            # _last_update_tokens_success is 0 until a refresh is confirmed;
+            # that huge apparent age must not trigger a spurious renewal.
+            # The keepalive poll itself is still sent.
             await client.send_refresh()
-            self.assertEqual(calls, [])
+            self.assertEqual(scheduled, [])
+            self.assertEqual(len(sent), 1)
+
+        asyncio.run(run_test())
+
+    def test_send_refresh_marks_disconnected_when_write_fails(self) -> None:
+        ensure_package_paths()
+        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
+        cls = signalr_mod.HymerSignalRClient
+
+        import asyncio
+
+        async def run_test() -> None:
+            lost: list[int] = []
+            client = self._connected_signalr_client(cls)
+            client._last_update_tokens_success = time.monotonic()
+            client._on_connection_lost = lambda: lost.append(1)
+
+            async def failing_send(request_id: int, payload: str) -> None:
+                raise RuntimeError("socket gone")
+
+            client._send_request_payload = failing_send
+
+            await client.send_refresh()
+
+            # The keepalive is this session's liveness probe: a failed write
+            # must hand over to the reconnect loop, not be swallowed.
+            self.assertFalse(client.connected)
+            self.assertEqual(lost, [1])
+
+        asyncio.run(run_test())
+
+    def test_send_refresh_defers_to_standby_refresh_tasks(self) -> None:
+        ensure_package_paths()
+        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
+        cls = signalr_mod.HymerSignalRClient
+
+        import asyncio
+
+        async def run_test() -> None:
+            for attr in (
+                "_token_refresh_task",
+                "_standby_wake_refresh_task",
+                "_standby_entry_refresh_task",
+            ):
+                client = self._connected_signalr_client(cls)
+                client._last_update_tokens_success = time.monotonic()
+                sent: list[str] = []
+
+                async def fake_send_payload(request_id: int, payload: str) -> None:
+                    sent.append(payload)
+
+                client._send_request_payload = fake_send_payload
+                gate = asyncio.Event()
+                task = asyncio.create_task(gate.wait())
+                setattr(client, attr, task)
+
+                try:
+                    await client.send_refresh()
+                    # Overlapping an in-flight auth refresh duplicates the
+                    # token exchange and can apply the results out of order.
+                    self.assertEqual(sent, [], f"polled while {attr} running")
+                finally:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+        asyncio.run(run_test())
+
+    def test_keepalive_request_ids_cannot_collide_with_commands(self) -> None:
+        ensure_package_paths()
+        pia_decoder = importlib.import_module("custom_components.hymer_connect_metadata.pia_decoder")
+
+        # A keepalive is never registered in _pending_requests, so a late
+        # response reusing a command's id would resolve that command's future
+        # and report an unacknowledged vehicle write as successful.
+        for _ in range(200):
+            keepalive_id = pia_decoder.extract_request_id_from_payload(
+                pia_decoder.build_refresh_command()
+            )
+            self.assertGreater(keepalive_id, pia_decoder._APP_REQUEST_ID_MAX)
+            self.assertLessEqual(
+                keepalive_id, pia_decoder._KEEPALIVE_REQUEST_ID_MAX
+            )
+
+        for _ in range(200):
+            command_id = pia_decoder.extract_request_id_from_payload(
+                pia_decoder.build_light_command(3, 1, bool_value=True)
+            )
+            self.assertLessEqual(command_id, pia_decoder._APP_REQUEST_ID_MAX)
+
+    def test_update_tokens_success_only_stamped_on_accepted_completion(self) -> None:
+        ensure_package_paths()
+        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
+        cls = signalr_mod.HymerSignalRClient
+
+        import asyncio
+
+        class Api:
+            access_token = "oauth-access"
+
+            async def get_remote_access_token(
+                self, vehicle_urn: str, refresh_token: str
+            ) -> str:
+                return "remote-access"
+
+        async def run_test() -> None:
+            for accepted in (False, True):
+                client = cls(
+                    api=Api(),
+                    session=object(),
+                    vehicle_urn="vehicle",
+                    scu_urn="scu",
+                    ehg_refresh_token="refresh",
+                )
+
+                class WS:
+                    closed = False
+
+                    async def send_str(self, raw: str) -> None:
+                        message = json.loads(
+                            raw.split(signalr_mod.SIGNALR_RECORD_SEPARATOR)[0]
+                        )
+                        invocation_id = message["invocationId"]
+                        future = client._completion_futures.get(invocation_id)
+                        if future is not None and not future.done():
+                            future.set_result(accepted)
+
+                client._ws = WS()
+                client._connected = True
+
+                ok = await client._send_update_tokens(wait_response=True)
+
+                self.assertEqual(ok, accepted)
+                self.assertGreater(client._last_update_tokens_attempt, 0)
+                if accepted:
+                    self.assertGreater(client._last_update_tokens_success, 0)
+                else:
+                    # A rejected refresh must not look healthy, or periodic
+                    # recovery stays suppressed for a full interval.
+                    self.assertEqual(client._last_update_tokens_success, 0.0)
 
         asyncio.run(run_test())
 

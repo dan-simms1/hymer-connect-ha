@@ -110,7 +110,11 @@ class HymerSignalRClient:
         self._signalr_token: str = ""
         self._connected_at: float = 0.0  # monotonic timestamp of connection
         self._last_data_received: float = 0.0  # monotonic timestamp of last data
-        self._last_update_tokens: float = 0.0  # monotonic ts of last UpdateTokens
+        # Attempt and success are tracked separately: stamping only on send
+        # would let a rejected or timed-out UpdateTokens look like a healthy
+        # refresh and suppress recovery for a full interval.
+        self._last_update_tokens_attempt: float = 0.0
+        self._last_update_tokens_success: float = 0.0
         self._scu_standby_since: float = 0.0  # monotonic ts of standby entry
         self._connection_lost_notified = False
         self._completion_futures: dict[str, asyncio.Future[bool]] = {}
@@ -554,22 +558,25 @@ class HymerSignalRClient:
             future = asyncio.get_running_loop().create_future()
             self._completion_futures[invocation_id] = future
         await self._ws.send_str(json.dumps(msg) + SIGNALR_RECORD_SEPARATOR)
-        # Record the send for the periodic-refresh check in send_refresh().
-        # Stamped here so every caller — connect, standby wake/entry, the
-        # expiry retry and the periodic refresh — resets the clock.
-        self._last_update_tokens = time.monotonic()
+        self._last_update_tokens_attempt = time.monotonic()
 
         if not wait_response:
+            # No completion is awaited, so this send can never advance the
+            # success clock — the periodic check keeps retrying until a
+            # confirmed refresh lands.
             _LOGGER.debug("UpdateTokens sent in fire-and-forget mode")
             return True
 
         try:
-            return await asyncio.wait_for(future, timeout=PIA_REQUEST_TIMEOUT)
+            ok = await asyncio.wait_for(future, timeout=PIA_REQUEST_TIMEOUT)
         except asyncio.TimeoutError:
             _LOGGER.warning("UpdateTokens timed out for %s", self._vehicle_urn)
             return False
         finally:
             self._completion_futures.pop(invocation_id, None)
+        if ok:
+            self._last_update_tokens_success = time.monotonic()
+        return ok
 
     def _handle_message(self, msg: dict[str, Any]) -> None:
         """Handle an incoming SignalR message."""
@@ -781,29 +788,33 @@ class HymerSignalRClient:
         """
         if not self.connected:
             return
-        if self._token_refresh_task is not None and not self._token_refresh_task.done():
+        if self._refresh_in_flight():
             _LOGGER.debug(
-                "Token refresh in progress for %s — skipping keepalive",
+                "Auth refresh in progress for %s — skipping keepalive",
                 self._vehicle_urn,
             )
             return
 
-        token_age = time.monotonic() - self._last_update_tokens
-        if self._last_update_tokens and token_age >= UPDATE_TOKENS_INTERVAL:
+        # Renew the EHG access token ahead of expiry.  Scheduled rather than
+        # awaited: the renewal performs an HTTP token exchange, and blocking
+        # here would stall the coordinator's update cycle.  Routing it through
+        # the shared refresh task also means in-flight commands are queued and
+        # replayed against the new token instead of racing it.
+        success_age = time.monotonic() - self._last_update_tokens_success
+        if (
+            self._last_update_tokens_success
+            and success_age >= UPDATE_TOKENS_INTERVAL
+        ):
             _LOGGER.info(
-                "EHG access token age %.0fs exceeds %ds for %s — refreshing",
-                token_age,
-                int(UPDATE_TOKENS_INTERVAL),
+                "EHG access token last confirmed %.0fs ago for %s — refreshing",
+                success_age,
                 self._vehicle_urn,
             )
-            try:
-                await self._send_update_tokens(wait_response=False)
-            except Exception:
-                _LOGGER.warning(
-                    "Periodic UpdateTokens refresh failed for %s",
-                    self._vehicle_urn,
-                    exc_info=True,
-                )
+            # Same operation as the expiry-driven path: re-send UpdateTokens
+            # and replay anything queued behind it.  STATUS_REMOTE_TOKEN_EXPIRED
+            # selects that behaviour without also re-running the OAuth2 refresh.
+            self._schedule_token_refresh_retry(STATUS_REMOTE_TOKEN_EXPIRED, None)
+            return
 
         # Skip the poll during 12V standby.  The SCU has no fresh data to
         # report, and it can echo stale cached slot values — which would
@@ -823,11 +834,34 @@ class HymerSignalRClient:
         try:
             await self._send_request_payload(request_id, payload)
         except Exception:
-            _LOGGER.debug(
-                "Keepalive refresh send failed for %s",
+            # The keepalive is the liveness probe for this session, so a write
+            # failure is evidence the transport is gone.  Swallowing it would
+            # leave every entity stale until something else happened to notice.
+            _LOGGER.warning(
+                "Keepalive refresh send failed for %s — marking SignalR "
+                "disconnected so the reconnect loop can recover",
                 self._vehicle_urn,
                 exc_info=True,
             )
+            self._connected = False
+            self._notify_connection_lost()
+
+    def _refresh_in_flight(self) -> bool:
+        """Return True while any auth-refresh task is still running.
+
+        The periodic keepalive must not overlap the expiry-driven refresh or
+        either standby transition refresh: each performs its own token
+        exchange and UpdateTokens, and running them concurrently duplicates
+        the exchange and can apply them out of order.
+        """
+        return any(
+            task is not None and not task.done()
+            for task in (
+                self._token_refresh_task,
+                self._standby_wake_refresh_task,
+                self._standby_entry_refresh_task,
+            )
+        )
 
     async def send_pia_request(self, b64_payload: str) -> bool:
         """Send a PiaRequest message to the SCU."""

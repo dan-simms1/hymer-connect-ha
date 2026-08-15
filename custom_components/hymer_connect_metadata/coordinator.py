@@ -122,6 +122,7 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._reconnect_backoff: int = _INITIAL_BACKOFF
         self._last_reconnect_attempt: float = 0.0
         self._signalr_connected_at: float = 0.0  # monotonic ts of last successful connect
+        self._last_frame_at: float = 0.0  # monotonic ts of last slot frame
         self._consecutive_failures: int = 0
         self._last_rest_metadata_refresh: float = 0.0
         self._cached_rest_data: dict[str, Any] = {}
@@ -169,6 +170,10 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         previous_slots = set(self._slot_data)
         self._slot_data.update(slot_data)
         now = time.monotonic()
+        # Marks this connection as proven live.  _slot_data itself cannot do
+        # that job: it is never cleared, so it stays non-empty across every
+        # reconnect and would report a brand-new session as already confirmed.
+        self._last_frame_at = now
         for slot in slot_data:
             self._slot_last_seen[slot] = now
         new_slots = set(self._slot_data) - previous_slots
@@ -469,9 +474,11 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.config_entry.title,
                 )
                 await self.force_reauth_and_reconnect()
-                client = self._signalr
-                if client and client.connected:
-                    return client
+                # This is the path most likely to need settling: the session
+                # is brand new and its subscriptions may still be in flight.
+                settled = await self._settled_client_after_reconnect()
+                if settled is not None:
+                    return settled
                 raise HomeAssistantError(
                     "SignalR reconnect after extended standby failed. "
                     "Try reloading the integration."
@@ -482,26 +489,33 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.config_entry.title,
         )
         await self.start_signalr()
-        client = self._signalr
-        if client and client.connected:
-            await self._await_subscription_confirmation()
-            return client
+        settled = await self._settled_client_after_reconnect()
+        if settled is not None:
+            return settled
         raise HomeAssistantError(
             "SignalR is not connected. Try reloading the integration."
         )
+
+    def _frame_seen_on_current_connection(self) -> bool:
+        """Return True once this SignalR session has delivered a slot frame."""
+        if not self._signalr_connected_at or not self._last_frame_at:
+            return False
+        return self._last_frame_at >= self._signalr_connected_at
 
     async def _await_subscription_confirmation(self) -> None:
         """Briefly wait for the first frame after a reconnect before sending.
 
         Subscriptions are sent as part of the connect, but the SCU may not
         have finished processing them when a command follows immediately.
-        Commands that land in that window are silently dropped.  The arrival
-        of any slot data proves the subscriptions are live.
+        Commands that land in that window are silently dropped.  A frame
+        arriving on *this* connection proves the subscriptions are live.
 
-        Only applies right after a reconnect that has produced no data yet;
-        an established connection returns immediately.
+        Deliberately keyed on frame-since-connect rather than "is _slot_data
+        non-empty": _slot_data is never cleared, so after the first successful
+        session it is always populated and would wave every later reconnect
+        straight through — exactly the case this guard exists for.
         """
-        if self._slot_data:
+        if self._frame_seen_on_current_connection():
             return
         connected_for = (
             time.monotonic() - self._signalr_connected_at
@@ -512,18 +526,14 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         _LOGGER.info(
-            "SignalR reconnected %.1fs ago for %s with no data yet — waiting for "
-            "subscription confirmation before sending",
+            "SignalR reconnected %.1fs ago for %s with no frame yet — waiting "
+            "for subscription confirmation before sending",
             connected_for,
             self.config_entry.title,
         )
-        # Poll _slot_data directly rather than reusing wait_for_first_frame():
-        # that stamps _setup_slot_baseline, which drives new-slot detection,
-        # and setting it from the command path could trigger spurious
-        # capability reloads.
         started = time.monotonic()
         while time.monotonic() - started < _SUBSCRIPTION_CONFIRM_TIMEOUT:
-            if self._slot_data:
+            if self._frame_seen_on_current_connection():
                 _LOGGER.debug(
                     "Subscriptions confirmed active for %s after %.1fs",
                     self.config_entry.title,
@@ -537,6 +547,22 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _SUBSCRIPTION_CONFIRM_TIMEOUT,
             self.config_entry.title,
         )
+
+    async def _settled_client_after_reconnect(self) -> HymerSignalRClient | None:
+        """Return a usable client once a fresh connection has settled.
+
+        Returns None if the connection did not survive the wait — the client
+        can be swapped or dropped while we sleep, so it is re-read afterwards
+        rather than trusting the reference we started with.
+        """
+        client = self._signalr
+        if not (client and client.connected):
+            return None
+        await self._await_subscription_confirmation()
+        client = self._signalr
+        if not (client and client.connected):
+            return None
+        return client
 
     async def async_ensure_signalr_connected(self) -> _SignalRCommandProxy:
         """Return a coordinator-backed sender with reconnect + retry semantics."""
