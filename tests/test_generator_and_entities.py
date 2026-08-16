@@ -533,6 +533,92 @@ class GeneratorAndEntityTests(unittest.TestCase):
         self.assertEqual(data["signalr_slots"], {(1, 1): 1})
         self.assertEqual(coordinator.active_slots, set())
 
+    def _unreachable_coordinator(self, coordinator_mod, failures: int):
+        """A coordinator whose SignalR is down after `failures` attempts."""
+        cls = coordinator_mod.HymerConnectCoordinator
+        coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
+        coordinator._cached_rest_data = {"vehicle": {}}
+        coordinator._last_rest_metadata_refresh = time.monotonic()
+        coordinator._vehicle_urn = ""
+        coordinator._scu_urn = ""
+        coordinator._vehicle_id = None
+        coordinator._vin = ""
+        coordinator._slot_data = {}
+        coordinator._slot_last_seen = {}
+        coordinator._signalr = None
+        coordinator._reconnect_task = None
+        coordinator._consecutive_failures = failures
+        coordinator._reconnect_backoff = coordinator_mod._MAX_BACKOFF
+        # Last attempt was _MAX_BACKOFF ago: enough for the old ceiling, not
+        # enough for the unreachable one.
+        coordinator._last_reconnect_attempt = time.monotonic() - coordinator_mod._MAX_BACKOFF - 1
+        coordinator.config_entry = type(
+            "Entry", (), {"data": {}, "unique_id": "e", "entry_id": "e", "title": "Test Van"},
+        )()
+        coordinator.api = type("Api", (), {})()
+        coordinator.hass = type(
+            "Hass", (),
+            {"config_entries": type("Cfg", (), {"async_entries": lambda self, d: []})()},
+        )()
+        return coordinator
+
+    def test_unreachable_vehicle_backs_off_to_minutes(self) -> None:
+        install_homeassistant_stubs()
+        import sys, asyncio
+
+        sys.modules.pop("custom_components.hymer_connect_metadata.coordinator", None)
+        ensure_package_paths()
+        coordinator_mod = importlib.import_module("custom_components.hymer_connect_metadata.coordinator")
+
+        coordinator = self._unreachable_coordinator(
+            coordinator_mod, coordinator_mod._MAX_CONSECUTIVE_FAILURES,
+        )
+        attempts: list[int] = []
+
+        async def start_signalr() -> None:
+            attempts.append(1)
+
+        coordinator.start_signalr = start_signalr
+
+        asyncio.run(coordinator._async_update_data())
+
+        # A van out of signal is an ordinary event that can last hours. Retrying
+        # every _MAX_BACKOFF seconds produced 2,142 attempts overnight in the
+        # field, because the cap was counted but never applied.
+        self.assertEqual(attempts, [])
+
+    def test_repeated_failures_escalate_to_full_reauth(self) -> None:
+        install_homeassistant_stubs()
+        import sys, asyncio
+
+        sys.modules.pop("custom_components.hymer_connect_metadata.coordinator", None)
+        ensure_package_paths()
+        coordinator_mod = importlib.import_module("custom_components.hymer_connect_metadata.coordinator")
+
+        coordinator = self._unreachable_coordinator(
+            coordinator_mod, coordinator_mod._REAUTH_AFTER_FAILURES,
+        )
+        coordinator._last_reconnect_attempt = time.monotonic() - coordinator_mod._UNREACHABLE_BACKOFF - 1
+        starts: list[int] = []
+        reauths: list[int] = []
+
+        async def start_signalr() -> None:
+            starts.append(1)
+
+        async def force_reauth_and_reconnect() -> None:
+            reauths.append(1)
+
+        coordinator.start_signalr = start_signalr
+        coordinator.force_reauth_and_reconnect = force_reauth_and_reconnect
+
+        asyncio.run(coordinator._async_update_data())
+
+        # Resubscribing on a session this broken never recovers it; the OAuth2
+        # session itself has to be replaced.
+        self.assertEqual(reauths, [1])
+        self.assertEqual(starts, [])
+
     def test_async_update_data_sends_keepalive_refresh_while_connected(self) -> None:
         install_homeassistant_stubs()
         import sys

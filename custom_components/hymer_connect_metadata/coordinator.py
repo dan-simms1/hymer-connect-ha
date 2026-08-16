@@ -45,6 +45,17 @@ _LOGGER = logging.getLogger(__name__)
 _INITIAL_BACKOFF = 1
 _MAX_BACKOFF = 16
 _MAX_CONSECUTIVE_FAILURES = 5
+# Once the failure count passes the cap, the cause is no longer a transient drop.
+# The usual one is the vehicle losing LTE, which is an ordinary event and can last
+# hours, so back off to minutes rather than continuing to retry every _MAX_BACKOFF
+# seconds.  Observed in the field on 2026-08-15: a van lost signal overnight and
+# the integration made 2,142 connection attempts in twelve hours, roughly one
+# every sixteen seconds, because the cap was counted but never acted on.
+_UNREACHABLE_BACKOFF = 300  # 5 minutes
+# After this many consecutive failures, retry the whole OAuth2 session rather than
+# the subscriptions alone.  A session can survive a long outage looking healthy
+# while being unable to subscribe, and reconnecting reuses it indefinitely.
+_REAUTH_AFTER_FAILURES = 10
 # Azure SignalR drops a new connection that arrives before it has cleaned up a
 # just-closed session server-side, showing up as repeating rapid drops.  When
 # the previous session was shorter than this threshold, wait the cooldown before
@@ -1007,7 +1018,14 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return rest_data
             # Apply exponential backoff between reconnection attempts
             since_last_attempt = now - self._last_reconnect_attempt
-            if since_last_attempt >= self._reconnect_backoff:
+            # Past the cap the vehicle is most likely unreachable rather than
+            # briefly dropped, so wait minutes between attempts.  Without this
+            # the backoff tops out at _MAX_BACKOFF and the poll cycle keeps
+            # calling start_signalr(), so the cap is counted but never applied.
+            wait = self._reconnect_backoff
+            if self._consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+                wait = max(wait, _UNREACHABLE_BACKOFF)
+            if since_last_attempt >= wait:
                 _LOGGER.info(
                     "SignalR not connected for %s (obj=%s), attempting start",
                     self.config_entry.title,
@@ -1015,17 +1033,41 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 self._last_reconnect_attempt = now
                 try:
-                    await self.start_signalr()
+                    # A session that has failed this many times in a row will
+                    # not be recovered by resubscribing on it: the OAuth2
+                    # session itself needs replacing, which is what the
+                    # extended-standby path already does.
+                    if self._consecutive_failures >= _REAUTH_AFTER_FAILURES:
+                        _LOGGER.warning(
+                            "SignalR has failed %d times for %s — forcing full "
+                            "re-authentication rather than retrying the session",
+                            self._consecutive_failures,
+                            self.config_entry.title,
+                        )
+                        await self.force_reauth_and_reconnect()
+                    else:
+                        await self.start_signalr()
                 except Exception:
                     _LOGGER.warning("SignalR connect attempt failed", exc_info=True)
             else:
-                remaining = self._reconnect_backoff - since_last_attempt
-                _LOGGER.warning(
-                    "SignalR reconnect backoff: %.0fs remaining (attempt %d/%d)",
-                    remaining,
-                    self._consecutive_failures,
-                    _MAX_CONSECUTIVE_FAILURES,
-                )
+                remaining = wait - since_last_attempt
+                if self._consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+                    # Debug, not warning: a vehicle out of signal is expected,
+                    # and at one line per poll this filled the log overnight.
+                    _LOGGER.debug(
+                        "SignalR unreachable for %s after %d attempts — next try "
+                        "in %.0fs",
+                        self.config_entry.title,
+                        self._consecutive_failures,
+                        remaining,
+                    )
+                else:
+                    _LOGGER.warning(
+                        "SignalR reconnect backoff: %.0fs remaining (attempt %d/%d)",
+                        remaining,
+                        self._consecutive_failures,
+                        _MAX_CONSECUTIVE_FAILURES,
+                    )
         else:
             # Keep the SCU publishing: it falls silent after a few minutes
             # without a poll, which strands every entity on its last value.

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.27] - 2026-08-16
+
+### Fixed
+
+- **Reconnect storm when the vehicle is unreachable.** The backoff ceiling was
+  `_MAX_BACKOFF` (16s) and `_MAX_CONSECUTIVE_FAILURES` was counted but never
+  acted on, because the coordinator's poll cycle called `start_signalr()` again
+  regardless of how many times the backoff loop had given up.
+
+  Observed in the field on 2026-08-15: the van lost its LTE connection
+  overnight and the integration made **2,142 connection attempts in twelve
+  hours**, roughly one every sixteen seconds, each failing at subscription with
+  `status=15`. A vehicle out of signal is an ordinary event that can last hours,
+  so once the failure cap is passed the retry interval now steps up to five
+  minutes and the per-poll warning drops to debug, where before it filled the
+  log overnight.
+
+- **A dead session was retried indefinitely rather than replaced.** After the
+  outage the van came back (the official app recovered) but the integration did
+  not: reconnecting reuses the existing OAuth2 session, and that session could
+  no longer subscribe. It took a Home Assistant restart to clear. After
+  `_REAUTH_AFTER_FAILURES` consecutive failures the coordinator now forces the
+  full re-authentication it already performs for extended standby, rather than
+  resubscribing on a session that cannot work.
+
 ## [1.0.26] - 2026-08-15
 
 ### Removed

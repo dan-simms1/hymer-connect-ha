@@ -6,6 +6,9 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
+- `1.0.27` — stops a reconnect storm when the vehicle is unreachable (2,142
+  attempts in twelve hours when the van lost LTE) and forces a full re-auth
+  once a session has failed repeatedly, rather than retrying a dead one.
 - `1.0.26` — removes the proactive session-auth renewal added in `1.0.25`
   (never released). Two field measurements showed it could not work: it first
   renewed the wrong credential, then used an interval longer than the expiry
