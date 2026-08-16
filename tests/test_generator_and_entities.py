@@ -619,6 +619,62 @@ class GeneratorAndEntityTests(unittest.TestCase):
         self.assertEqual(reauths, [1])
         self.assertEqual(starts, [])
 
+    def test_failed_connect_escalates_the_shared_backoff(self) -> None:
+        install_homeassistant_stubs()
+        import sys, asyncio
+
+        sys.modules.pop("custom_components.hymer_connect_metadata.coordinator", None)
+        ensure_package_paths()
+        coordinator_mod = importlib.import_module("custom_components.hymer_connect_metadata.coordinator")
+        cls = coordinator_mod.HymerConnectCoordinator
+        api_error = importlib.import_module(
+            "custom_components.hymer_connect_metadata.api"
+        ).HymerConnectApiError
+
+        coordinator = cls.__new__(cls)
+        seed_connection_state(coordinator)
+        coordinator._signalr = None
+        coordinator._session = object()
+        coordinator.api = object()
+        coordinator._vehicle_urn = "v"
+        coordinator._scu_urn = "s"
+        coordinator._ehg_refresh_token = "r"
+        coordinator._slot_data = {}
+        coordinator._reconnect_backoff = coordinator_mod._MAX_BACKOFF
+        coordinator._consecutive_failures = coordinator_mod._MAX_CONSECUTIVE_FAILURES - 1
+        coordinator._signalr_connected_at = 0.0
+        coordinator._shutting_down = False
+        coordinator.config_entry = type("Entry", (), {"title": "Test Van"})()
+
+        class FailingClient:
+            connected = False
+
+            def __init__(self, **kw): pass
+
+            async def start(self): raise api_error("PiaRequest 1 failed with status=15")
+
+            async def stop(self): pass
+
+        async def run() -> None:
+            with (
+                mock.patch.object(coordinator_mod, "HymerSignalRClient", FailingClient),
+                mock.patch.object(coordinator_mod, "all_slots", return_value=set()),
+            ):
+                await coordinator.start_signalr()
+
+        asyncio.run(run())
+
+        # The escalation must live where failures are counted. Putting it in one
+        # caller left the connection-lost loop, which keeps its own delay,
+        # retrying every _MAX_BACKOFF seconds: 2,142 attempts overnight.
+        self.assertEqual(
+            coordinator._consecutive_failures,
+            coordinator_mod._MAX_CONSECUTIVE_FAILURES,
+        )
+        self.assertEqual(
+            coordinator._reconnect_backoff, coordinator_mod._UNREACHABLE_BACKOFF
+        )
+
     def test_async_update_data_sends_keepalive_refresh_while_connected(self) -> None:
         install_homeassistant_stubs()
         import sys

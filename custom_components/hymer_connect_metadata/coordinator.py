@@ -802,7 +802,10 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         self.config_entry.title,
                     )
                     return
-                delay = min(delay * 2, _MAX_BACKOFF)
+                # Follow the coordinator's backoff once it escalates, so a
+                # vehicle that is simply out of signal is not retried every
+                # _MAX_BACKOFF seconds by this loop.
+                delay = max(min(delay * 2, _MAX_BACKOFF), self._reconnect_backoff)
             _LOGGER.warning(
                 "SignalR reconnect loop exhausted for %s",
                 self.config_entry.title,
@@ -878,6 +881,14 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._reconnect_backoff = min(
                     self._reconnect_backoff * 2, _MAX_BACKOFF
                 )
+                # Escalate here rather than in any one caller: this is the only
+                # place failures are counted, so every retry path — the poll
+                # cycle and the connection-lost loop, which keeps its own delay
+                # — inherits the longer wait.  Patching a single caller leaves
+                # the other one retrying every _MAX_BACKOFF seconds, which is
+                # what produced 2,142 attempts overnight.
+                if self._consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+                    self._reconnect_backoff = _UNREACHABLE_BACKOFF
                 _LOGGER.info(
                     "Next SignalR reconnect attempt in %ds", self._reconnect_backoff
                 )
