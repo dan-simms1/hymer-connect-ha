@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import math
 import random
+import struct
 import time
 from typing import Any
 import zlib
@@ -38,6 +39,7 @@ APP_PIA_VERSION = "v0.32.0"
 
 _WIRE_VARINT = 0
 _WIRE_LEN = 2
+_WIRE_FIXED32 = 5
 
 _BLE_PROTOCOL_REQUEST_FIELD = 1
 _BLE_PROTOCOL_RESPONSE_FIELD = 2
@@ -65,6 +67,32 @@ _PAIR_MOBILE_CONFIRMATION_SUCCESS_FIELD = 1
 _PAIR_MOBILE_RESPONSE_ACCESS_TOKEN_FIELD = 1
 _PAIR_MOBILE_RESPONSE_ACCESS_REFRESH_TOKEN_FIELD = 2
 _PAIR_MOBILE_RESPONSE_CONFIRMATION_REQUIRED_FIELD = 3
+
+# Control-write path. Value writes and commands are different Request topics,
+# so firmware that accepts one may still discard the other.
+_REQUEST_CONNECTED_COMPONENT_FIELD = 4
+_REQUEST_COMMAND_FIELD = 9
+
+_CC_REQUEST_TOPIC_SET_VALUES_FIELD = 2
+_SET_VALUES_VALUE_FIELD = 1  # repeated ConnectedComponentValue
+
+# ConnectedComponentValue. The app sets 1 and 2 always, exactly one of 3-6 by
+# registry datatype, and 10 only when the capability carries an instance.
+# Field 9 (connectedComponentIndex) is NEVER serialised by the app's builder;
+# emitting it is one of the ways the prior art diverged from the app.
+_CC_VALUE_ID_FIELD = 1
+_CC_VALUE_COMPONENT_ID_FIELD = 2
+_CC_VALUE_INT32_FIELD = 3
+_CC_VALUE_STRING_FIELD = 4
+_CC_VALUE_BOOL_FIELD = 5
+_CC_VALUE_FLOAT_FIELD = 6
+_CC_VALUE_INSTANCE_FIELD = 10
+
+_COMMAND_REQUEST_TOPIC_RESTART_FIELD = 2
+_RESTART_COMMAND_COLD_FIELD = 1
+
+#: PIA Response.status meaning success. The app also treats absent/zero as success.
+PIA_STATUS_SUCCESS = 1
 
 
 def _require_bleak() -> None:
@@ -134,6 +162,28 @@ class BlePiaFrame:
 
 
 @dataclass
+class BleResponse:
+    """A decoded BleProtocol response envelope, with no topic assumed."""
+
+    request_id: int | None = None
+    status: int | None = None
+    timestamp: int | None = None
+    topic_fields: list[int] = field(default_factory=list)
+
+    @property
+    def succeeded(self) -> bool:
+        """True when the SCU accepted the request.
+
+        The app treats an absent or zero status as success, as well as an
+        explicit SUCCESS.
+        """
+        return self.status in (None, 0, PIA_STATUS_SUCCESS)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**asdict(self), "succeeded": self.succeeded}
+
+
+@dataclass
 class BlePairMobileResponse:
     """Decoded PairMobileResponse plus its outer Response envelope fields."""
 
@@ -198,6 +248,18 @@ def _encode_bool_field(field_number: int, value: bool) -> bytes:
 def _encode_string_field(field_number: int, value: str) -> bytes:
     encoded = value.encode("utf-8")
     return _encode_length_delimited_field(field_number, encoded)
+
+
+def _encode_int32_field(field_number: int, value: int) -> bytes:
+    """Encode a protobuf int32, which is sign-extended to 64 bits when negative."""
+    if not -(2**31) <= value < 2**31:
+        raise ValueError(f"int32 value out of range: {value}")
+    return _encode_varint_field(field_number, value + (1 << 64) if value < 0 else value)
+
+
+def _encode_float_field(field_number: int, value: float) -> bytes:
+    """Encode a protobuf float (fixed32, IEEE-754 single, little-endian)."""
+    return _encode_key(field_number, _WIRE_FIXED32) + struct.pack("<f", value)
 
 
 def _encode_length_delimited_field(field_number: int, value: bytes) -> bytes:
@@ -302,6 +364,29 @@ def build_user_pair_mobile_confirmation_topic(*, success: bool = True) -> bytes:
     )
 
 
+def build_request_message_with_topic(
+    topic_field_number: int,
+    topic_payload: bytes,
+    *,
+    request_id: int,
+    timestamp: int,
+    version: str = APP_PIA_VERSION,
+) -> bytes:
+    """Encode the Request envelope from BasePiaApi.createRequest() around any topic.
+
+    The envelope is identical for every topic; only the field number carrying
+    the topic changes (8 user, 4 connectedComponent, 9 command).
+    """
+    return b"".join(
+        (
+            _encode_varint_field(_REQUEST_REQUEST_ID_FIELD, request_id),
+            _encode_string_field(_REQUEST_VERSION_FIELD, version),
+            _encode_varint_field(_REQUEST_TIMESTAMP_FIELD, timestamp),
+            _encode_length_delimited_field(topic_field_number, topic_payload),
+        )
+    )
+
+
 def build_request_message(
     user_topic_payload: bytes,
     *,
@@ -309,14 +394,13 @@ def build_request_message(
     timestamp: int,
     version: str = APP_PIA_VERSION,
 ) -> bytes:
-    """Encode the Request envelope used by BasePiaApi.createRequest()."""
-    return b"".join(
-        (
-            _encode_varint_field(_REQUEST_REQUEST_ID_FIELD, request_id),
-            _encode_string_field(_REQUEST_VERSION_FIELD, version),
-            _encode_varint_field(_REQUEST_TIMESTAMP_FIELD, timestamp),
-            _encode_length_delimited_field(_REQUEST_USER_FIELD, user_topic_payload),
-        )
+    """Encode the Request envelope carrying a UserRequestTopic."""
+    return build_request_message_with_topic(
+        _REQUEST_USER_FIELD,
+        user_topic_payload,
+        request_id=request_id,
+        timestamp=timestamp,
+        version=version,
     )
 
 
@@ -391,6 +475,202 @@ def build_pair_mobile_confirmation_ble_pia_frame(
         )
     )
     return encode_ble_pia_frame(payload)
+
+
+def instance_string_to_bytes(instance: str) -> bytes:
+    """Convert a capability instance string to raw bytes, as the app does.
+
+    Mirrors `instanceStringToBytes`: the string is split on hyphens and each
+    part parsed as base 16, so "01-0a-ff" becomes b"\\x01\\x0a\\xff". It is a
+    byte string, not a numeric index -- encoding it as a number or as its own
+    text is one of the ways the prior art diverged from the app.
+    """
+    if not instance:
+        return b""
+    parts = [part for part in instance.split("-") if part != ""]
+    try:
+        return bytes(int(part, 16) for part in parts)
+    except ValueError as err:
+        raise ValueError(f"invalid instance string {instance!r}") from err
+
+
+def build_connected_component_value(
+    *,
+    value_id: int,
+    component_id: int,
+    int_value: int | None = None,
+    string_value: str | None = None,
+    bool_value: bool | None = None,
+    float_value: float | None = None,
+    instance: str | None = None,
+) -> bytes:
+    """Encode one ConnectedComponentValue exactly as the app's `toPiaValues` does.
+
+    Exactly one of the four typed values must be given, chosen by the registry
+    datatype. Field 9 (connectedComponentIndex) is deliberately never emitted.
+    """
+    provided = [
+        name
+        for name, value in (
+            ("int_value", int_value),
+            ("string_value", string_value),
+            ("bool_value", bool_value),
+            ("float_value", float_value),
+        )
+        if value is not None
+    ]
+    if len(provided) != 1:
+        raise ValueError(
+            "exactly one typed value must be provided, got: "
+            + (", ".join(provided) if provided else "none")
+        )
+
+    parts = [
+        _encode_varint_field(_CC_VALUE_ID_FIELD, value_id),
+        _encode_varint_field(_CC_VALUE_COMPONENT_ID_FIELD, component_id),
+    ]
+    if int_value is not None:
+        parts.append(_encode_int32_field(_CC_VALUE_INT32_FIELD, int_value))
+    elif string_value is not None:
+        parts.append(_encode_string_field(_CC_VALUE_STRING_FIELD, string_value))
+    elif bool_value is not None:
+        parts.append(_encode_bool_field(_CC_VALUE_BOOL_FIELD, bool_value))
+    else:
+        parts.append(_encode_float_field(_CC_VALUE_FLOAT_FIELD, float(float_value)))
+
+    # Only when the capability actually carries an instance; the app tests for
+    # truthiness, so an empty string emits nothing.
+    if instance:
+        parts.append(
+            _encode_length_delimited_field(
+                _CC_VALUE_INSTANCE_FIELD, instance_string_to_bytes(instance)
+            )
+        )
+    return b"".join(parts)
+
+
+def build_set_values_topic(values: list[bytes]) -> bytes:
+    """Encode ConnectedComponentRequestTopic with the setValues branch set."""
+    if not values:
+        raise ValueError("setValues requires at least one value")
+    set_values = b"".join(
+        _encode_length_delimited_field(_SET_VALUES_VALUE_FIELD, value) for value in values
+    )
+    return _encode_length_delimited_field(_CC_REQUEST_TOPIC_SET_VALUES_FIELD, set_values)
+
+
+def build_set_values_ble_pia_frame(
+    values: list[bytes],
+    *,
+    request_id: int | None = None,
+    timestamp: int | None = None,
+    version: str = APP_PIA_VERSION,
+) -> tuple[bytes, int]:
+    """Build the app-style setValues frame. Returns (frame, request_id).
+
+    The request id is returned because it is the only sound acknowledgement:
+    the GATT write completing and the UI updating both happen regardless of
+    whether the SCU executed anything.
+    """
+    resolved_request_id = app_like_request_id() if request_id is None else request_id
+    payload = build_ble_protocol_request_payload(
+        build_request_message_with_topic(
+            _REQUEST_CONNECTED_COMPONENT_FIELD,
+            build_set_values_topic(values),
+            request_id=resolved_request_id,
+            timestamp=app_like_request_timestamp() if timestamp is None else timestamp,
+            version=version,
+        )
+    )
+    return encode_ble_pia_frame(payload), resolved_request_id
+
+
+def build_restart_ble_pia_frame(
+    *,
+    cold: bool = True,
+    request_id: int | None = None,
+    timestamp: int | None = None,
+    version: str = APP_PIA_VERSION,
+) -> tuple[bytes, int]:
+    """Build the app-style SCU restart frame. Returns (frame, request_id).
+
+    Restart is Request.command (field 9), a different topic from setValues, so
+    a working restart is not evidence that value writes are accepted.
+    """
+    resolved_request_id = app_like_request_id() if request_id is None else request_id
+    restart_command = _encode_bool_field(_RESTART_COMMAND_COLD_FIELD, cold)
+    command_topic = _encode_length_delimited_field(
+        _COMMAND_REQUEST_TOPIC_RESTART_FIELD, restart_command
+    )
+    payload = build_ble_protocol_request_payload(
+        build_request_message_with_topic(
+            _REQUEST_COMMAND_FIELD,
+            command_topic,
+            request_id=resolved_request_id,
+            timestamp=app_like_request_timestamp() if timestamp is None else timestamp,
+            version=version,
+        )
+    )
+    return encode_ble_pia_frame(payload), resolved_request_id
+
+
+def decode_ble_response_payload(payload: bytes) -> BleResponse:
+    """Decode any BleProtocol response, without requiring a particular topic.
+
+    `decode_pair_mobile_response_payload` insists on a mobilePair topic. Value
+    writes and commands answer with the same envelope and no topic body, so
+    they need a decoder that reads only the request id and status.
+    """
+    response_payload: bytes | None = None
+    offset = 0
+    while offset < len(payload):
+        key, offset = _decode_varint(payload, offset)
+        field_number = key >> 3
+        wire_type = key & 0x07
+        if field_number == _BLE_PROTOCOL_RESPONSE_FIELD and wire_type == _WIRE_LEN:
+            response_payload, offset = _decode_length_delimited(payload, offset)
+            continue
+        offset = _skip_protobuf_field(payload, offset, wire_type)
+    if response_payload is None:
+        raise ValueError("BleProtocol payload does not contain a response")
+
+    request_id: int | None = None
+    status: int | None = None
+    timestamp: int | None = None
+    topic_fields: list[int] = []
+    offset = 0
+    while offset < len(response_payload):
+        key, offset = _decode_varint(response_payload, offset)
+        field_number = key >> 3
+        wire_type = key & 0x07
+        if wire_type == _WIRE_VARINT:
+            value, offset = _decode_varint(response_payload, offset)
+            if field_number == _RESPONSE_REQUEST_ID_FIELD:
+                request_id = value
+            elif field_number == _RESPONSE_STATUS_FIELD:
+                status = value
+            elif field_number == _RESPONSE_TIMESTAMP_FIELD:
+                timestamp = value
+            continue
+        if wire_type == _WIRE_LEN:
+            _, offset = _decode_length_delimited(response_payload, offset)
+            topic_fields.append(field_number)
+            continue
+        offset = _skip_protobuf_field(response_payload, offset, wire_type)
+
+    return BleResponse(
+        request_id=request_id,
+        status=status,
+        timestamp=timestamp,
+        topic_fields=topic_fields,
+    )
+
+
+def decode_ble_response_frame(frame: bytes, *, validate_crc: bool = True) -> BleResponse:
+    """Decode one framed BLE PIA response of any topic."""
+    return decode_ble_response_payload(
+        decode_ble_pia_frame(frame, validate_crc=validate_crc).payload
+    )
 
 
 def decode_pair_mobile_response_payload(payload: bytes) -> BlePairMobileResponse:

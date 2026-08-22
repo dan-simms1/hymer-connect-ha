@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - handled at runtime
 
 from .ble import (
     BONDING_STATE_CHARACTERISTIC_UUID,
+    BleResponse,
     BleSupportError,
     POWER_CONTROL_CHARACTERISTIC_UUID,
     POWER_STATE_CHARACTERISTIC_UUID,
@@ -24,6 +25,9 @@ from .ble import (
     UART_TX_CHARACTERISTIC_UUID,
     build_pair_mobile_ble_pia_frame,
     build_pair_mobile_confirmation_ble_pia_frame,
+    build_restart_ble_pia_frame,
+    build_set_values_ble_pia_frame,
+    decode_ble_response_frame,
     decode_pair_mobile_response_frame,
     BLE_PIA_HEADER_SIZE,
     BLE_PIA_MAGIC,
@@ -37,6 +41,8 @@ DEFAULT_CONNECT_TIMEOUT = 10.0
 DEFAULT_TLS_TIMEOUT = 20.0
 DEFAULT_WAKE_DELAY = 2.0
 SCU_UART_WRITE_PACING_S = 0.005
+#: The app's BLE_REQUEST_TIMEOUT: how long it waits for a matching response.
+BLE_REQUEST_TIMEOUT = 30.0
 
 
 class ScuBleSessionError(RuntimeError):
@@ -492,6 +498,77 @@ class ScuBleSession:
             pair_mobile_response=pair_response.to_dict(),
         )
 
+    async def set_values(
+        self,
+        values: list[bytes],
+        *,
+        request_id: int | None = None,
+        timeout: float = BLE_REQUEST_TIMEOUT,
+    ) -> BleResponse:
+        """Send one setValues write and wait for the SCU's acknowledgement.
+
+        Requires an established TLS session. Build `values` with
+        `ble.build_connected_component_value`.
+        """
+        frame, resolved_request_id = build_set_values_ble_pia_frame(
+            values, request_id=request_id
+        )
+        return await self._send_request_and_await_response(
+            frame, resolved_request_id, timeout=timeout
+        )
+
+    async def restart(
+        self,
+        *,
+        cold: bool = True,
+        request_id: int | None = None,
+        timeout: float = BLE_REQUEST_TIMEOUT,
+    ) -> BleResponse:
+        """Send an SCU restart command and wait for its acknowledgement."""
+        frame, resolved_request_id = build_restart_ble_pia_frame(
+            cold=cold, request_id=request_id
+        )
+        return await self._send_request_and_await_response(
+            frame, resolved_request_id, timeout=timeout
+        )
+
+    async def _send_request_and_await_response(
+        self,
+        frame: bytes,
+        request_id: int,
+        *,
+        timeout: float,
+    ) -> BleResponse:
+        """Send one framed request and wait for the response with a matching id.
+
+        Matching on the request id is the only sound acknowledgement. The GATT
+        write completes immediately regardless, and the SCU also pushes
+        unsolicited frames on this channel, so taking the next frame to arrive
+        would routinely read somebody else's message as the answer.
+        """
+        await self._send_application_data(frame)
+        deadline = self._loop.time() + timeout if self._loop is not None else None
+        while True:
+            response_frame = await self._next_pending_frame(deadline)
+            try:
+                response = decode_ble_response_frame(response_frame)
+            except ValueError:
+                # Not a response envelope: a subscription push, or a frame we
+                # do not model. Neither is an error, so keep waiting.
+                continue
+            if response.request_id == request_id:
+                return response
+
+    async def _next_pending_frame(self, deadline: float | None) -> bytes:
+        """Return the next complete PIA frame, pumping TLS until one arrives."""
+        while True:
+            if self._pending_frames:
+                return self._pending_frames.popleft()
+            incoming = await self._next_uart_packet(deadline)
+            exchange = self._tls_client.feed_encrypted(incoming)
+            await self._write_tls_records(exchange.outbound_tls_records)
+            self._buffer_plaintext_chunks(exchange.plaintext_chunks)
+
     async def _send_application_data_and_wait_for_frame(
         self,
         plaintext: bytes,
@@ -500,13 +577,7 @@ class ScuBleSession:
     ) -> bytes:
         await self._send_application_data(plaintext)
         deadline = self._loop.time() + timeout if self._loop is not None else None
-        while True:
-            if self._pending_frames:
-                return self._pending_frames.popleft()
-            incoming = await self._next_uart_packet(deadline)
-            exchange = self._tls_client.feed_encrypted(incoming)
-            await self._write_tls_records(exchange.outbound_tls_records)
-            self._buffer_plaintext_chunks(exchange.plaintext_chunks)
+        return await self._next_pending_frame(deadline)
 
     async def _send_application_data(self, plaintext: bytes) -> None:
         if self._tls_client is None or not self._tls_client.handshake_complete:

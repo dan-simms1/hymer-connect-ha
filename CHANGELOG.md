@@ -6,6 +6,12 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
+- `1.0.29` — keeps a working SignalR connection when a single subscription
+  fails with a transient status such as `SCU_IS_NOT_ONLINE`, instead of tearing
+  it down and leaving the vehicle uncontrollable while LTE is marginal.
+- `1.0.28` — adds the BLE control-write encoding to the token tool, built from
+  the decompiled Android app: `setValues` value writes and SCU restart, with
+  acknowledgement judged on a matching request id. Untested against a vehicle.
 - `1.0.27` — stops a reconnect storm when the vehicle is unreachable (2,142
   attempts in twelve hours when the van lost LTE) and forces a full re-auth
   once a session has failed repeatedly, rather than retrying a dead one.

@@ -77,5 +77,68 @@ class TokenToolBleTransportTests(unittest.TestCase):
         asyncio.run(run_test())
 
 
+class RequestResponseMatchingTests(unittest.TestCase):
+    """A control write is acknowledged by a matching request id, nothing else."""
+
+    @staticmethod
+    def _response_frame(request_id: int, status: int = 1) -> bytes:
+        from hymer_token_tool import ble
+
+        body = ble._encode_varint_field(
+            ble._RESPONSE_REQUEST_ID_FIELD, request_id
+        ) + ble._encode_varint_field(ble._RESPONSE_STATUS_FIELD, status)
+        return ble.encode_ble_pia_frame(
+            ble._encode_length_delimited_field(ble._BLE_PROTOCOL_RESPONSE_FIELD, body)
+        )
+
+    def _run_with_frames(self, frames: list[bytes], request_id: int):
+        import asyncio
+        from collections import deque
+
+        async def run_test():
+            session = scu.ScuBleSession("scu")
+            session._loop = asyncio.get_running_loop()
+            session._pending_frames = deque(frames)
+
+            async def fake_send(_plaintext: bytes) -> None:
+                return None
+
+            session._send_application_data = fake_send
+            return await session._send_request_and_await_response(
+                b"request-frame", request_id, timeout=1.0
+            )
+
+        return asyncio.run(run_test())
+
+    def test_response_for_a_different_request_is_ignored(self) -> None:
+        """The SCU pushes unsolicited frames, so the first frame is not the answer."""
+        response = self._run_with_frames(
+            [self._response_frame(111), self._response_frame(222, status=1)],
+            request_id=222,
+        )
+        self.assertEqual(response.request_id, 222)
+        self.assertTrue(response.succeeded)
+
+    def test_undecodable_frames_are_skipped_rather_than_fatal(self) -> None:
+        from hymer_token_tool import ble
+
+        subscription_push = ble.encode_ble_pia_frame(b"\x22\x02\x08\x01")
+        response = self._run_with_frames(
+            [subscription_push, self._response_frame(7)], request_id=7
+        )
+        self.assertEqual(response.request_id, 7)
+
+    def test_an_error_status_is_returned_rather_than_waited_through(self) -> None:
+        response = self._run_with_frames(
+            [self._response_frame(9, status=15)], request_id=9
+        )
+        self.assertEqual(response.status, 15)
+        self.assertFalse(response.succeeded)
+
+    def test_no_matching_response_times_out(self) -> None:
+        with self.assertRaises(scu.ScuBleSessionError):
+            self._run_with_frames([self._response_frame(1)], request_id=999)
+
+
 if __name__ == "__main__":
     unittest.main()

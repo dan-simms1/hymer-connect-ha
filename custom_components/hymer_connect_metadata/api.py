@@ -44,6 +44,21 @@ class HymerConnectAuthError(HymerConnectApiError):
     """Authentication error."""
 
 
+class PiaRequestFailedError(HymerConnectApiError):
+    """A PiaRequest was answered with a non-success status.
+
+    Carries the status so callers can distinguish a transient upstream
+    condition (the vehicle is asleep or the cloud could not reach it) from a
+    session that is genuinely invalid. Subclasses HymerConnectApiError so
+    existing handlers keep working unchanged.
+    """
+
+    def __init__(self, message: str, *, status: int, request_id: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.request_id = request_id
+
+
 class HymerConnectApi:
     """Client for the HYMER Connect cloud API."""
 

@@ -1716,31 +1716,111 @@ class GeneratorAndEntityTests(unittest.TestCase):
         entries = pia_decoder._decode_protobuf(catalog[0][2])
         self.assertEqual(len(entries), 131)
 
-    def test_initial_subscription_failure_raises(self) -> None:
+    @staticmethod
+    def _subscription_client():
         ensure_package_paths()
-        signalr_mod = importlib.import_module("custom_components.hymer_connect_metadata.signalr_client")
-        cls = signalr_mod.HymerSignalRClient
+        signalr_mod = importlib.import_module(
+            "custom_components.hymer_connect_metadata.signalr_client"
+        )
+        return signalr_mod, signalr_mod.HymerSignalRClient(
+            api=object(),
+            session=object(),
+            vehicle_urn="vehicle",
+            scu_urn="scu",
+        )
 
+    def test_transient_subscription_failure_keeps_the_connection(self) -> None:
+        """One subscription failing with status=15 must not kill the connection.
+
+        Seen on a live vehicle with marginal LTE: one of seven subscriptions
+        returned SCU_IS_NOT_ONLINE ~200ms after connecting while the others
+        delivered 118 sensor slots. Raising here tore down a working
+        connection and left the vehicle uncontrollable, because commands
+        require a healthy client.
+        """
         import asyncio
 
         async def run_test() -> None:
-            client = cls(
-                api=object(),
-                session=object(),
-                vehicle_urn="vehicle",
-                scu_urn="scu",
+            signalr_mod, client = self._subscription_client()
+            api_mod = importlib.import_module(
+                "custom_components.hymer_connect_metadata.api"
             )
             calls = 0
 
             async def fake_send(_: str) -> bool:
                 nonlocal calls
                 calls += 1
-                return calls < 4
+                if calls == 4:
+                    raise api_mod.PiaRequestFailedError(
+                        "PiaRequest 1 failed with status=15",
+                        status=15,
+                        request_id=1,
+                    )
+                return True
+
+            client.send_pia_request = fake_send
+            await client._send_initial_subscriptions()  # must not raise
+
+            # Every subscription is still attempted, not abandoned at the
+            # first failure.
+            self.assertGreater(calls, 4)
+
+        asyncio.run(run_test())
+
+    def test_unanswered_subscription_does_not_kill_the_connection(self) -> None:
+        import asyncio
+
+        async def run_test() -> None:
+            _, client = self._subscription_client()
+            calls = 0
+
+            async def fake_send(_: str) -> bool:
+                nonlocal calls
+                calls += 1
+                return calls != 4
+
+            client.send_pia_request = fake_send
+            await client._send_initial_subscriptions()
+            self.assertGreater(calls, 4)
+
+        asyncio.run(run_test())
+
+    def test_auth_failure_still_propagates(self) -> None:
+        """An expired token means the session really is invalid — still raise."""
+        import asyncio
+
+        async def run_test() -> None:
+            signalr_mod, client = self._subscription_client()
+            api_mod = importlib.import_module(
+                "custom_components.hymer_connect_metadata.api"
+            )
+
+            async def fake_send(_: str) -> bool:
+                raise api_mod.PiaRequestFailedError(
+                    "PiaRequest 1 failed with status=12",
+                    status=12,
+                    request_id=1,
+                )
 
             client.send_pia_request = fake_send
             with self.assertRaises(signalr_mod.HymerConnectApiError):
                 await client._send_initial_subscriptions()
-            self.assertEqual(calls, 4)
+
+        asyncio.run(run_test())
+
+    def test_all_subscriptions_failing_still_raises(self) -> None:
+        """A connection where nothing subscribed is useless — reconnect."""
+        import asyncio
+
+        async def run_test() -> None:
+            signalr_mod, client = self._subscription_client()
+
+            async def fake_send(_: str) -> bool:
+                return False
+
+            client.send_pia_request = fake_send
+            with self.assertRaises(signalr_mod.HymerConnectApiError):
+                await client._send_initial_subscriptions()
 
         asyncio.run(run_test())
 

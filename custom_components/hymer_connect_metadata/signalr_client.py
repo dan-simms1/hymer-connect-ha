@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 import aiohttp
 
-from .api import HymerConnectApi, HymerConnectApiError
+from .api import HymerConnectApi, HymerConnectApiError, PiaRequestFailedError
 from .capability_resolver import main_switch_slots
 from .const import USER_AGENT
 from .pia_decoder import (
@@ -28,6 +28,7 @@ from .pia_decoder import (
     STATUS_AUTH_TOKEN_EXPIRED,
     STATUS_REMOTE_TOKEN_EXPIRED,
     STATUS_SUCCESS,
+    TRANSIENT_UPSTREAM_STATUSES,
     build_subscription_requests,
     build_light_command,
     build_multi_sensor_command,
@@ -404,16 +405,58 @@ class HymerSignalRClient:
         _LOGGER.info("SignalR connected to datahub for %s", self._vehicle_urn)
 
     async def _send_initial_subscriptions(self) -> None:
-        """Send the captured app subscription burst on a fresh connection."""
+        """Send the captured app subscription burst on a fresh connection.
+
+        A subscription that fails because the vehicle or cloud could not
+        service it does NOT invalidate the connection. Observed on a live
+        vehicle with marginal LTE: one of the seven subscriptions returned
+        STATUS_SCU_IS_NOT_ONLINE about 200 ms after connecting, while the
+        remaining subscriptions delivered 118 sensor slots successfully. The
+        old behaviour raised on the first such failure, which tore down a
+        working connection and — because commands require a healthy client —
+        made the vehicle uncontrollable for as long as the LTE stayed
+        marginal.
+
+        The official app settles the failed request and keeps its socket, so
+        that is what we do. Auth failures still propagate, because those mean
+        the session really is invalid and the caller needs to re-authenticate.
+        """
         requests = build_subscription_requests()
         _LOGGER.info("Sending %d PiaRequest subscriptions", len(requests))
+        succeeded = 0
+        transient_failures: list[str] = []
         for payload in requests:
-            ok = await self.send_pia_request(payload)
-            if not ok:
-                request_id = extract_request_id_from_payload(payload)
-                raise HymerConnectApiError(
-                    f"Initial PiaRequest subscription failed for request_id={request_id}"
-                )
+            request_id = extract_request_id_from_payload(payload)
+            try:
+                ok = await self.send_pia_request(payload)
+            except PiaRequestFailedError as err:
+                if err.status not in TRANSIENT_UPSTREAM_STATUSES:
+                    raise
+                transient_failures.append(f"{request_id}:status={err.status}")
+                continue
+            if ok:
+                succeeded += 1
+                continue
+            # A falsy return is a local send failure or a timeout rather than
+            # a status from the SCU; treat it the same way as a transient one
+            # so a single slow subscription cannot kill the connection.
+            transient_failures.append(f"{request_id}:no-response")
+
+        if transient_failures:
+            _LOGGER.warning(
+                "%d of %d PiaRequest subscriptions did not take for %s (%s) — "
+                "keeping the connection, as the app does",
+                len(transient_failures),
+                len(requests),
+                self._vehicle_urn,
+                ", ".join(transient_failures),
+            )
+
+        if succeeded == 0:
+            raise HymerConnectApiError(
+                "No PiaRequest subscription succeeded "
+                f"({len(transient_failures)}/{len(requests)} failed)"
+            )
 
     async def _send_request_payload(self, request_id: int, payload: str) -> None:
         """Send one encoded PiaRequest payload to the hub."""
@@ -661,8 +704,10 @@ class HymerSignalRClient:
                 pending.future.set_result(response or {"status": STATUS_SUCCESS})
             else:
                 pending.future.set_exception(
-                    HymerConnectApiError(
-                        f"PiaRequest {request_id} failed with status={status}"
+                    PiaRequestFailedError(
+                        f"PiaRequest {request_id} failed with status={status}",
+                        status=int(status),
+                        request_id=int(request_id),
                     )
                 )
             self._pending_requests.pop(int(request_id), None)

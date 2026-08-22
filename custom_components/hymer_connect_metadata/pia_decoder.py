@@ -78,8 +78,28 @@ _KEEPALIVE_REQUEST_ID_MAX = 10_999_999
 # Cloud DataHub response statuses reverse-engineered from the app transport
 # protocol. Only the values used by the live SignalR path are named here.
 STATUS_SUCCESS = 1
+STATUS_MAIN_USER_CANNOT_ACCEPT_INVITATION = 11
 STATUS_AUTH_TOKEN_EXPIRED = 12
 STATUS_REMOTE_TOKEN_EXPIRED = 13
+STATUS_VEHICLE_NOT_FOUND = 14
+STATUS_SCU_IS_NOT_ONLINE = 15
+STATUS_CALL_TO_SCU_FAILED = 16
+STATUS_CLOUD_ERROR = 17
+STATUS_CONNECTIVITY_ISSUE = 18
+
+#: Statuses that mean "the vehicle or the cloud could not service this request
+#: right now", as opposed to "this session is invalid". They say nothing about
+#: the health of our own connection, so a single subscription failing with one
+#: of these is not a reason to tear the connection down. The official app
+#: settles the failed request and keeps its socket open.
+TRANSIENT_UPSTREAM_STATUSES = frozenset(
+    {
+        STATUS_SCU_IS_NOT_ONLINE,
+        STATUS_CALL_TO_SCU_FAILED,
+        STATUS_CLOUD_ERROR,
+        STATUS_CONNECTIVITY_ISSUE,
+    }
+)
 
 
 def build_subscription_requests() -> list[str]:

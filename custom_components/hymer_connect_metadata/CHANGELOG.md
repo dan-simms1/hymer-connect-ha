@@ -7,6 +7,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.29] - 2026-08-19
+
+### Fixed
+
+- **A single failing subscription no longer tears down a working SignalR
+  connection.** On connect the integration sends seven `PiaRequest`
+  subscriptions and raised on the first one that failed. Because commands
+  require a healthy client, that made the vehicle uncontrollable whenever one
+  subscription failed — even though the rest of the connection was fine.
+
+  Observed on the vehicle on 2026-08-18: one subscription returned
+  `status=15` (`SCU_IS_NOT_ONLINE`) about 200 ms after each connect, while the
+  same connections delivered **118 sensor slots** successfully. The connection
+  was then destroyed and rebuilt every few seconds — 21 consecutive failures
+  in a few minutes — and every attempt to write a value failed with
+  "SignalR is not connected".
+
+  Subscriptions that fail with a transient upstream status
+  (`SCU_IS_NOT_ONLINE`, `CALL_TO_SCU_FAILED`, `CLOUD_ERROR`,
+  `CONNECTIVITY_ISSUE`) or that go unanswered are now logged and skipped, and
+  the connection is kept. This matches the official app, which settles the
+  failed request and keeps its socket. Auth statuses
+  (`AUTH_TOKEN_EXPIRED`, `REMOTE_TOKEN_EXPIRED`) still propagate, because
+  those mean the session really is invalid. If *no* subscription succeeds the
+  connection is still treated as failed, since it would carry no data.
+
+### Added
+
+- `PiaRequestFailedError`, a `HymerConnectApiError` subclass carrying the PIA
+  `status` and `request_id`, so callers can tell a transient vehicle-side
+  condition from an invalid session. Existing handlers are unaffected.
+- Named constants for the full PIA status enum, and
+  `TRANSIENT_UPSTREAM_STATUSES` describing which of them say nothing about the
+  health of our own connection.
+
+## [1.0.28] - 2026-08-18
+
+### Added
+
+- **BLE control-write encoding, mirroring the official Android app.** The token
+  tool could already reach the SCU over Bluetooth, complete the legacy TLS
+  handshake and pair a mobile device, but it could not ask the vehicle to
+  *change* anything. It now builds and sends `setValues` writes and SCU restart
+  commands, in `tools/hymer_token_tool`:
+
+  - `build_connected_component_value()` encodes one value the way the app's
+    `toPiaValues` does: fields 1 and 2 always, exactly one typed field (3-6)
+    chosen by datatype, and field 10 only when the capability carries an
+    instance. Field 9 (`connectedComponentIndex`) is never emitted.
+  - `instance_string_to_bytes()` converts a capability instance the way the app
+    does, splitting on hyphens and parsing each part as base 16, so `01-0a-ff`
+    becomes three raw bytes rather than a number or a string.
+  - `build_set_values_ble_pia_frame()` and `build_restart_ble_pia_frame()`
+    produce complete frames and return the request id used.
+  - `ScuBleSession.set_values()` / `.restart()` send one request and wait for
+    the response **whose request id matches**, with the app's 30 second
+    timeout.
+  - New CLI command `scu-set-value` for running a single write against a
+    vehicle, with `--restart` for the command topic.
+
+  This path is deliberately built from the decompiled app rather than from any
+  existing open-source implementation. The prior art wrapped its command
+  payload in protobuf field 2, which on BLE is `BleProtocol.response` rather
+  than `request`, so the SCU parsed each command as a response and discarded it
+  without an error — which is consistent with the "silently dropped" symptom
+  that led that project to remove BLE writes entirely.
+
+  Two traps are encoded in the design, both taken from the app: the GATT write
+  completing is not an acknowledgement, and neither is the UI changing, because
+  the app updates its own store optimistically before any response arrives.
+  Only a matching request id counts.
+
+  Not yet exercised against a vehicle. Value writes (`Request.connectedComponent`)
+  and restart (`Request.command`) are different topics, so a working restart
+  would not on its own prove that value writes are accepted.
+
+### Changed
+
+- `build_request_message_with_topic()` generalises the PIA Request envelope over
+  the topic field number, so the same envelope serves pairing (field 8),
+  value writes (field 4) and commands (field 9). `build_request_message()` keeps
+  its previous pairing-specific behaviour and delegates.
+- `ScuBleSession` gained `_next_pending_frame()`, and the existing
+  send-and-wait helper now uses it, so frame reassembly lives in one place.
+
 ## [1.0.27] - 2026-08-16
 
 ### Fixed

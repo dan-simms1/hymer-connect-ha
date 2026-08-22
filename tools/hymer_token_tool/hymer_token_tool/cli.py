@@ -17,8 +17,15 @@ from typing import Any
 import aiohttp
 
 from .api import HymerAuthError, HymerCloudClient, HymerTokenToolError, VehicleRecord
-from .ble import BleSupportError, DiscoveredBleDevice, probe_device, scan_devices
+from .ble import (
+    BleSupportError,
+    DiscoveredBleDevice,
+    build_connected_component_value,
+    probe_device,
+    scan_devices,
+)
 from .scu import (
+    BLE_REQUEST_TIMEOUT,
     DEFAULT_WAKE_DELAY,
     ScuBleSession,
     ScuBleSessionError,
@@ -117,6 +124,36 @@ def build_parser() -> argparse.ArgumentParser:
     scu_pair_mobile.add_argument("--wake-delay", type=float, default=DEFAULT_WAKE_DELAY)
     scu_pair_mobile.add_argument("--skip-confirmation", action="store_true")
     scu_pair_mobile.add_argument("--json", action="store_true", dest="json_output")
+
+    scu_set_value = subparsers.add_parser(
+        "scu-set-value",
+        help="Send one setValues write over BLE and report the SCU's response.",
+    )
+    scu_set_value.add_argument("--identifier", required=True)
+    scu_set_value.add_argument("--value-id", type=int)
+    scu_set_value.add_argument("--component-id", type=int)
+    value_group = scu_set_value.add_mutually_exclusive_group()
+    value_group.add_argument("--bool", dest="bool_value", choices=("true", "false"))
+    value_group.add_argument("--int", dest="int_value", type=int)
+    value_group.add_argument("--float", dest="float_value", type=float)
+    value_group.add_argument("--string", dest="string_value")
+    scu_set_value.add_argument(
+        "--instance",
+        help="capability instance as hyphen-separated hex, e.g. 01-0a-ff",
+    )
+    scu_set_value.add_argument("--timeout", type=float, default=10.0)
+    scu_set_value.add_argument("--tls-timeout", type=float, default=20.0)
+    scu_set_value.add_argument("--request-timeout", type=float, default=BLE_REQUEST_TIMEOUT)
+    scu_set_value.add_argument("--write-chunk-size", type=int)
+    scu_set_value.add_argument("--bond", action="store_true")
+    scu_set_value.add_argument("--wake-up", action="store_true")
+    scu_set_value.add_argument("--wake-delay", type=float, default=DEFAULT_WAKE_DELAY)
+    scu_set_value.add_argument(
+        "--restart",
+        action="store_true",
+        help="send an SCU restart command instead of a value write",
+    )
+    scu_set_value.add_argument("--json", action="store_true", dest="json_output")
 
     mint_remote_refresh = subparsers.add_parser("mint-remote-refresh", parents=[common])
     mint_remote_refresh.add_argument("--activation-token")
@@ -658,6 +695,84 @@ async def command_scu_tls_probe(args: argparse.Namespace) -> int:
     return 0
 
 
+async def command_scu_set_value(args: argparse.Namespace) -> int:
+    """Send one BLE control write and report whether the SCU acknowledged it.
+
+    This is the decisive test for whether the SCU accepts BLE writes. Judge it
+    only on the returned status: the GATT write completes regardless, and the
+    app's own UI updates optimistically before any response arrives.
+    """
+    if args.restart:
+        if args.value_id is not None or args.component_id is not None:
+            raise SystemExit("--restart does not take --value-id or --component-id")
+    else:
+        if args.value_id is None or args.component_id is None:
+            raise SystemExit("--value-id and --component-id are required")
+        if all(
+            value is None
+            for value in (
+                args.bool_value,
+                args.int_value,
+                args.float_value,
+                args.string_value,
+            )
+        ):
+            raise SystemExit("one of --bool/--int/--float/--string is required")
+
+    session = ScuBleSession(
+        args.identifier,
+        connect_timeout=args.timeout,
+        write_chunk_size=args.write_chunk_size,
+    )
+    try:
+        await session.connect(bond=args.bond)
+        if args.wake_up:
+            await session.wake_up()
+            if args.wake_delay > 0:
+                await asyncio.sleep(args.wake_delay)
+        tls_metadata = await session.establish_tls(timeout=args.tls_timeout)
+
+        if args.restart:
+            description = "restart (cold)"
+            response = await session.restart(timeout=args.request_timeout)
+        else:
+            value = build_connected_component_value(
+                value_id=args.value_id,
+                component_id=args.component_id,
+                bool_value=(
+                    None if args.bool_value is None else args.bool_value == "true"
+                ),
+                int_value=args.int_value,
+                float_value=args.float_value,
+                string_value=args.string_value,
+                instance=args.instance,
+            )
+            description = (
+                f"setValues id={args.value_id} component={args.component_id}"
+            )
+            response = await session.set_values(
+                [value], timeout=args.request_timeout
+            )
+    finally:
+        await session.disconnect()
+
+    payload = {
+        "identifier": args.identifier,
+        "request": description,
+        "negotiated_tls_version": tls_metadata["negotiated_tls_version"],
+        "cipher_suite": tls_metadata["cipher_suite"],
+        **response.to_dict(),
+    }
+    if args.json_output:
+        print(_json_dump(payload))
+    else:
+        print(f"SCU: {args.identifier}")
+        print(f"TLS: {payload['negotiated_tls_version']} {payload['cipher_suite']}")
+        print(f"Request: {description} (id {response.request_id})")
+        print(f"Status: {response.status} | accepted: {response.succeeded}")
+    return 0 if response.succeeded else 1
+
+
 async def command_scu_pair_mobile(args: argparse.Namespace) -> int:
     session = ScuBleSession(
         args.identifier,
@@ -819,6 +934,8 @@ async def async_main(args: argparse.Namespace) -> int:
         return await command_scu_tls_probe(args)
     if args.command == "scu-pair-mobile":
         return await command_scu_pair_mobile(args)
+    if args.command == "scu-set-value":
+        return await command_scu_set_value(args)
     if args.command == "mint-remote-refresh":
         return await command_mint_remote_refresh(args)
     raise HymerTokenToolError(f"Unknown command: {args.command}")
