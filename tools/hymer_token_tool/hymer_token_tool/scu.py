@@ -27,6 +27,7 @@ from .ble import (
     build_pair_mobile_confirmation_ble_pia_frame,
     build_restart_ble_pia_frame,
     build_set_values_ble_pia_frame,
+    build_user_topic_probe_frame,
     decode_ble_response_frame,
     decode_pair_mobile_response_frame,
     BLE_PIA_HEADER_SIZE,
@@ -205,6 +206,15 @@ class ScuBleSession:
     def write_with_response(self) -> bool:
         return self._write_with_response
 
+    def set_write_with_response(self, value: bool) -> None:
+        """Override the UART RX write mode chosen at connect time.
+
+        The tool prefers write-without-response; the decompiled app uses
+        write-with-response (`setWriteType(2)`). Field tests flip between the
+        two, so expose that as an explicit call rather than a private poke.
+        """
+        self._write_with_response = bool(value)
+
     @property
     def write_chunk_size(self) -> int:
         return self._write_chunk_size
@@ -248,15 +258,10 @@ class ScuBleSession:
                 self._bond_status = await self._pair_client(client)
                 if not _client_is_connected(client):
                     await client.connect()
-                services = await client.get_services()
-            else:
-                services = getattr(client, "services", None)
-                if services is None:
-                    services = await client.get_services()
-            if services is None:
-                services = await client.get_services()
+            services = await _discover_services(client)
             self._client = client
             self._device_name = getattr(client, "name", None) or self.identifier
+            await self._acquire_large_mtu(client)
             mtu_size = getattr(client, "mtu_size", None)
             if isinstance(mtu_size, int) and mtu_size > 0:
                 self._mtu_size = mtu_size
@@ -273,11 +278,15 @@ class ScuBleSession:
                 )
 
             rx_properties = _characteristic_properties(self._uart_rx_characteristic)
+            # The app uses WRITE_TYPE_DEFAULT (write-with-response) for the SCU
+            # UART RX, and write-without-response silently corrupts the large
+            # TLS handshake and PairMobileRequest writes at low MTU. Prefer
+            # with-response.
             self._write_with_response = _choose_write_mode(
                 properties=rx_properties,
                 identifier=self.identifier,
                 description="UART RX characteristic",
-                prefer_without_response=True,
+                prefer_without_response=False,
             )
             self._write_chunk_size = _choose_write_chunk_size(
                 mtu_size=self._mtu_size,
@@ -517,6 +526,26 @@ class ScuBleSession:
             frame, resolved_request_id, timeout=timeout
         )
 
+    async def probe_user_topic(
+        self,
+        field_number: int,
+        payload: bytes = b"",
+        *,
+        timeout: float = BLE_REQUEST_TIMEOUT,
+    ) -> BleResponse:
+        """Send one UserRequestTopic sub-field and wait for the matching response.
+
+        Read-oriented probe for account/device-management topics such as
+        getPairedMobileDevices. The caller is responsible for choosing a
+        non-destructive field and payload; see build_user_topic_probe_frame.
+        """
+        frame, resolved_request_id = build_user_topic_probe_frame(
+            field_number, payload
+        )
+        return await self._send_request_and_await_response(
+            frame, resolved_request_id, timeout=timeout
+        )
+
     async def restart(
         self,
         *,
@@ -578,6 +607,29 @@ class ScuBleSession:
         await self._send_application_data(plaintext)
         deadline = self._loop.time() + timeout if self._loop is not None else None
         return await self._next_pending_frame(deadline)
+
+    async def _acquire_large_mtu(self, client: Any) -> None:
+        """Ask the transport for a larger ATT MTU, as the app does (requestMtu(245)).
+
+        On the BlueZ backend bleak does not negotiate the MTU automatically and
+        leaves it at the 23-byte default, which makes a PairMobileRequest ~63
+        GATT chunks. A write burst that long overruns the SCU's NUS receive
+        buffer, so the request is dropped with no error and the SCU never
+        answers -- exactly the "timed out waiting for SCU BLE/TLS data" symptom.
+        CoreBluetooth negotiates a large MTU on its own, so this is a no-op
+        there. Best-effort: any failure leaves the default in place.
+        """
+        acquire = getattr(client, "_acquire_mtu", None)
+        if acquire is None:
+            return
+        try:
+            await acquire()
+        except Exception as err:  # noqa: BLE001 - MTU stays at default on failure
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "MTU acquisition failed (continuing at default): %s", err
+            )
 
     async def _send_application_data(self, plaintext: bytes) -> None:
         if self._tls_client is None or not self._tls_client.handshake_complete:
@@ -670,6 +722,24 @@ class ScuBleSession:
 def default_mobile_device_name() -> str:
     candidate = platform.node().strip()
     return candidate or "hymer-token-tool"
+
+
+async def _discover_services(client: Any) -> Any:
+    """Return the client's GATT services across bleak versions.
+
+    bleak 3.x removed the `get_services()` coroutine in favour of the
+    `services` property, which is populated during connect(). Older releases
+    only had the coroutine, so try the property first and fall back.
+    """
+    services = getattr(client, "services", None)
+    if services is not None:
+        return services
+    getter = getattr(client, "get_services", None)
+    if getter is None:
+        raise ScuBleSessionError(
+            "This bleak version exposes neither `services` nor `get_services()`"
+        )
+    return await getter()
 
 
 def _find_characteristic(services: Any, uuid: str) -> Any:

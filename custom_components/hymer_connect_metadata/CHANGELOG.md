@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.30] - 2026-08-22
+
+### Fixed
+
+- **BLE pairing and control now work end to end against the vehicle.** The
+  SCU's Nordic UART RX was being written *without* response; at a 23-byte MTU a
+  `PairMobileRequest` (it carries two JWTs, ~63 GATT chunks) then overran the
+  SCU receive buffer and was dropped with no reply - the "timed out waiting for
+  SCU BLE/TLS data" seen on 2026-08-22. The SCU UART RX now defaults to
+  write-with-response, matching the app's `WRITE_TYPE_DEFAULT`. Verified in the
+  field the same day: from a Linux host inside the vehicle with no LTE, the
+  app-level `PairMobileRequest` completed and minted a remote refresh token
+  over BLE, and a `setValues` write returned `status=1` (SUCCESS) and actuated
+  the load. `connect()` also now acquires a larger MTU like the app
+  (`requestMtu(245)`) as a second line of defence, though write-with-response
+  alone carried the field test at MTU 23. Diagnosis credited to the upstream
+  `BetaHydri/hymer-connect-ha-ble` notes, which documented the same overflow
+  and the write-with-response requirement.
+
+### Added
+
+- **The complete PIA response status enum** in `pia_decoder.py`, read from the
+  decompiled app (bundle byte 19,151,699): values 0-19 including
+  `ACCESS_DENIED` (5), `INVALID_INPUT` (2) and `INVALID_PROTOCOL_VERSION` (4).
+  These distinguish "understood but not authorised" from "malformed", which
+  matters for interpreting BLE write responses.
+- **Field tooling for BLE control from a Linux host**, in `tools/hymer_token_tool`:
+  `dbus_pair.py` (a BlueZ pairing agent locked to one device), `full_pair.sh`
+  (remove -> rescan -> bond -> app pair -> one confirmed write), `bond_test.py`
+  (TLS + one `setValues`), `setup_ble_host.sh` (rebuilds a LibreELEC Pi as a BLE
+  host from a pinned, hash-verified wheel manifest), and `BLE_RUNBOOK.md`.
+  Secrets are read from `0600` files (`--activation-token-file`, `--ini-file`),
+  never from argv; nothing actuates without `CONFIRM=1` and explicit
+  component/value ids; every script exits non-zero on failure.
+- `scu-user-topic` CLI command and `build_user_topic_probe_frame()` /
+  `ScuBleSession.probe_user_topic()`: a **single-shot, operator-gated** probe for
+  UserRequestTopic device/account-management sub-fields (e.g. the paired-device
+  list). It refuses to run without `--i-understand-may-be-destructive` and never
+  sweeps a range, because some sub-fields (`deleteUser`, `deleteAllUsers`) are
+  destructive and their field numbers are unknown.
+- `ScuBleSession.set_write_with_response()` as a public override for the UART
+  write mode, and `--activation-token-file` on `scu-pair-mobile` and
+  `mint-remote-refresh`.
+
+### Changed
+
+- The token tool supports **bleak 3.x**, which removed
+  `BleakClient.get_services()`. Service discovery now uses the `services`
+  property with a guarded fallback to the old coroutine, in both `scu.py` and
+  `ble.py`. `pyproject.toml` allows `bleak<4`.
+- The token-tool README and RUNBOOK no longer claim the BLE path is unverified.
+  On 2026-08-22 a Linux host inside the vehicle bonded, completed the TLS
+  handshake (`TLSv1.1 AES128-SHA`) and had a `setValues` write parsed and
+  answered by the SCU with `ACCESS_DENIED` - understood, not yet authorised.
+  App-level `PairMobileRequest` is the remaining open step.
+
+### Security
+
+- Field-session secret filenames (`activation.txt`, `creds.ini`,
+  `remote-refresh.txt`, `pair-session.json`) are gitignored at any depth, and
+  the runbook carries no real vehicle, SCU, host or adapter identifiers.
+
 ## [1.0.29] - 2026-08-19
 
 ### Fixed

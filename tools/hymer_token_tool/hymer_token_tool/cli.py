@@ -112,7 +112,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     scu_pair_mobile = subparsers.add_parser("scu-pair-mobile")
     scu_pair_mobile.add_argument("--identifier", required=True)
-    scu_pair_mobile.add_argument("--activation-token", required=True)
+    scu_pair_mobile.add_argument("--activation-token")
+    scu_pair_mobile.add_argument("--activation-token-file", type=Path)
     scu_pair_mobile.add_argument("--confirmation-token", required=True)
     scu_pair_mobile.add_argument("--mobile-device-name")
     scu_pair_mobile.add_argument("--timeout", type=float, default=10.0)
@@ -155,8 +156,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scu_set_value.add_argument("--json", action="store_true", dest="json_output")
 
+    scu_user_topic = subparsers.add_parser(
+        "scu-user-topic",
+        help="Send ONE UserRequestTopic sub-field to the SCU and print the response "
+             "(for probing device/account-management topics such as the paired-device list).",
+    )
+    scu_user_topic.add_argument("--identifier", required=True)
+    scu_user_topic.add_argument("--field", type=int, required=True,
+                                help="UserRequestTopic sub-field number to send")
+    scu_user_topic.add_argument("--payload-hex", default="",
+                                help="hex bytes for the sub-field body (default: empty = a read/list probe)")
+    scu_user_topic.add_argument(
+        "--i-understand-may-be-destructive", action="store_true", dest="ack_destructive",
+        help="required: acknowledge that some UserRequestTopic fields (deleteUser, "
+             "deleteAllUsers) are destructive and their field numbers are unknown",
+    )
+    scu_user_topic.add_argument("--timeout", type=float, default=10.0)
+    scu_user_topic.add_argument("--tls-timeout", type=float, default=20.0)
+    scu_user_topic.add_argument("--request-timeout", type=float, default=BLE_REQUEST_TIMEOUT)
+    scu_user_topic.add_argument("--wake-up", action="store_true")
+    scu_user_topic.add_argument("--wake-delay", type=float, default=DEFAULT_WAKE_DELAY)
+    scu_user_topic.add_argument("--json", action="store_true", dest="json_output")
+
     mint_remote_refresh = subparsers.add_parser("mint-remote-refresh", parents=[common])
     mint_remote_refresh.add_argument("--activation-token")
+    mint_remote_refresh.add_argument("--activation-token-file", type=Path)
     mint_remote_refresh.add_argument("--identifier")
     mint_remote_refresh.add_argument("--mobile-device-name")
     mint_remote_refresh.add_argument("--scan-timeout", type=float, default=8.0)
@@ -172,6 +196,36 @@ def build_parser() -> argparse.ArgumentParser:
     mint_remote_refresh.add_argument("--session-file", type=Path)
 
     return parser
+
+
+def _read_secret_file(path: Path, *, what: str) -> str:
+    """Read a secret from a file that must be private to the current user.
+
+    A token that crosses argv is visible to every process on the host for as
+    long as the command runs; a file is not, provided nobody else can read it.
+    """
+    if not path.exists():
+        raise HymerTokenToolError(f"{what} file does not exist: {path}")
+    mode = path.stat().st_mode & 0o777
+    if mode & 0o077:
+        raise HymerTokenToolError(
+            f"{what} file {path} must not be group/other readable (mode {mode:03o}); "
+            "run: chmod 600 on it"
+        )
+    value = path.read_text(encoding="utf-8").strip()
+    if not value:
+        raise HymerTokenToolError(f"{what} file is empty: {path}")
+    return value
+
+
+def _resolve_activation_token(args: argparse.Namespace) -> str:
+    token_file = getattr(args, "activation_token_file", None)
+    if token_file is not None:
+        return _read_secret_file(token_file, what="Activation token")
+    return _prompt_if_missing(
+        getattr(args, "activation_token", None),
+        "Activation token / QR value: ",
+    ).strip()
 
 
 def _prompt_if_missing(value: str | None, prompt: str, *, secret: bool = False) -> str:
@@ -695,6 +749,57 @@ async def command_scu_tls_probe(args: argparse.Namespace) -> int:
     return 0
 
 
+async def command_scu_user_topic(args: argparse.Namespace) -> int:
+    """Send one UserRequestTopic sub-field and report the SCU's response.
+
+    Deliberately single-shot and operator-driven: some sub-fields are
+    destructive and their field numbers are unknown, so this never sweeps a
+    range. Pairing fields 4 (pairMobileDevice) and 6 (confirmation) are refused
+    here -- use scu-pair-mobile for those.
+    """
+    if not args.ack_destructive:
+        raise SystemExit(
+            "Refusing to send. Some UserRequestTopic fields are destructive "
+            "(deleteUser, deleteAllUsers) and their numbers are unknown. Pass "
+            "--i-understand-may-be-destructive once you have chosen a field "
+            "deliberately, and never sweep a range."
+        )
+    if args.field in (4, 6):
+        raise SystemExit("Fields 4/6 are the pairing ceremony; use scu-pair-mobile instead.")
+    try:
+        payload = bytes.fromhex(args.payload_hex) if args.payload_hex else b""
+    except ValueError as err:
+        raise SystemExit(f"--payload-hex is not valid hex: {err}")
+
+    session = ScuBleSession(args.identifier, connect_timeout=args.timeout)
+    try:
+        await session.connect(bond=False)
+        if args.wake_up:
+            await session.wake_up()
+            if args.wake_delay > 0:
+                await asyncio.sleep(args.wake_delay)
+        tls_metadata = await session.establish_tls(timeout=args.tls_timeout)
+        response = await session.probe_user_topic(
+            args.field, payload, timeout=args.request_timeout
+        )
+    finally:
+        await session.disconnect()
+
+    payload_out = {
+        "identifier": args.identifier,
+        "field": args.field,
+        "negotiated_tls_version": tls_metadata["negotiated_tls_version"],
+        **response.to_dict(),
+    }
+    if args.json_output:
+        print(_json_dump(payload_out))
+    else:
+        print(f"SCU: {args.identifier}  field={args.field}")
+        print(f"Response: request_id={response.request_id} status={response.status} "
+              f"topic_fields={response.topic_fields} succeeded={response.succeeded}")
+    return 0 if response.succeeded else 1
+
+
 async def command_scu_set_value(args: argparse.Namespace) -> int:
     """Send one BLE control write and report whether the SCU acknowledged it.
 
@@ -774,6 +879,9 @@ async def command_scu_set_value(args: argparse.Namespace) -> int:
 
 
 async def command_scu_pair_mobile(args: argparse.Namespace) -> int:
+    activation_token = _resolve_activation_token(args)
+    if not activation_token:
+        raise HymerTokenToolError("Activation token is required")
     session = ScuBleSession(
         args.identifier,
         connect_timeout=args.timeout,
@@ -782,7 +890,7 @@ async def command_scu_pair_mobile(args: argparse.Namespace) -> int:
     try:
         await session.connect(bond=args.bond)
         result = await session.pair_mobile_device(
-            activation_token=args.activation_token,
+            activation_token=activation_token,
             confirmation_token=args.confirmation_token,
             mobile_device_name=args.mobile_device_name or default_mobile_device_name(),
             wake_up=args.wake_up,
@@ -826,10 +934,7 @@ async def command_scu_pair_mobile(args: argparse.Namespace) -> int:
 
 
 async def command_mint_remote_refresh(args: argparse.Namespace) -> int:
-    activation_token = _prompt_if_missing(
-        args.activation_token,
-        "Activation token / QR value: ",
-    ).strip()
+    activation_token = _resolve_activation_token(args)
     if not activation_token:
         raise HymerTokenToolError("Activation token is required")
 
@@ -936,6 +1041,8 @@ async def async_main(args: argparse.Namespace) -> int:
         return await command_scu_pair_mobile(args)
     if args.command == "scu-set-value":
         return await command_scu_set_value(args)
+    if args.command == "scu-user-topic":
+        return await command_scu_user_topic(args)
     if args.command == "mint-remote-refresh":
         return await command_mint_remote_refresh(args)
     raise HymerTokenToolError(f"Unknown command: {args.command}")

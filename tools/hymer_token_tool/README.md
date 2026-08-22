@@ -10,16 +10,26 @@ The long-term goal is to provide an alternative desktop/laptop workflow for
 obtaining the remote-access refresh token without relying on the patched-APK +
 proxy method from the main repository README.
 
-## Early Alpha Warning
+## Status
 
-This tool is **early alpha** and should **not be used yet** for real vehicle
-pairing or production refresh-token minting.
+**Live BLE pairing has been exercised on real vehicle hardware** (2026-08-22,
+Grand Canyon S 700, from a Linux/BlueZ host inside the vehicle):
 
-It is included in the repository as research code and for future development.
-The live BLE/TLS pairing path in this tool has not been verified end-to-end on
-real vehicle hardware in this repository, so the supported path for real use
-remains the manual proxy-capture method described in the main repository
-README.
+- link-layer bonding, the legacy TLS handshake over BLE (`TLSv1.1 AES128-SHA`),
+  and the BLE PIA framing all work against the real SCU;
+- a `setValues` write was parsed and answered by the SCU with a matching
+  request id and `ACCESS_DENIED`, i.e. understood but not yet authorised;
+- the app-level `PairMobileRequest` has **not** yet completed against the
+  vehicle, so no remote refresh token has been minted this way.
+
+So the tool is a working research instrument, not a finished product. Anything
+that actuates the vehicle requires explicit confirmation (`CONFIRM=1`) and the
+target component/value ids as inputs; nothing is hardcoded. Secrets are read
+from `0600` files, never from argv. See `BLE_RUNBOOK.md` for the field
+procedure, host requirements and failure signatures.
+
+The manual proxy-capture method in the main repository README remains the
+reliable way to obtain a remote refresh token today.
 
 ## Current scope
 

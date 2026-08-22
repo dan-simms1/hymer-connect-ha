@@ -321,6 +321,40 @@ class ResponseDecodingTests(unittest.TestCase):
             ble.decode_ble_response_frame(bytes(frame))
 
 
+class UserTopicProbeTests(unittest.TestCase):
+    """The generic UserRequestTopic probe used for device-management topics."""
+
+    def _request(self, frame: bytes) -> bytes:
+        payload = ble.decode_ble_pia_frame(frame).payload
+        self.assertEqual(payload[0], 0x0A, "must be BleProtocol.request (field 1)")
+        return _fields(payload)[ble._BLE_PROTOCOL_REQUEST_FIELD][0]
+
+    def test_probe_frame_carries_the_field_under_the_user_topic(self) -> None:
+        frame, request_id = ble.build_user_topic_probe_frame(
+            7, b"", request_id=42, timestamp=99
+        )
+        request = self._request(frame)
+        found = _fields(request)
+        self.assertEqual(int.from_bytes(found[ble._REQUEST_REQUEST_ID_FIELD][0], "big"), 42)
+        self.assertEqual(found[ble._REQUEST_VERSION_FIELD][0], b"v0.32.0")
+        # UserRequestTopic is Request field 8; our probed sub-field lives inside it.
+        self.assertIn(ble._REQUEST_USER_FIELD, found)
+        user_topic = found[ble._REQUEST_USER_FIELD][0]
+        self.assertIn(7, _fields(user_topic))
+        self.assertEqual(request_id, 42)
+
+    def test_probe_payload_is_carried_through(self) -> None:
+        frame, _ = ble.build_user_topic_probe_frame(9, b"\xde\xad", request_id=1, timestamp=2)
+        user_topic = _fields(self._request(frame))[ble._REQUEST_USER_FIELD][0]
+        self.assertEqual(_fields(user_topic)[9][0], b"\xde\xad")
+
+    def test_probe_is_not_a_connected_component_write(self) -> None:
+        # Must go via the User topic (8), never the setValues topic (4).
+        frame, _ = ble.build_user_topic_probe_frame(5, request_id=1, timestamp=2)
+        found = _fields(self._request(frame))
+        self.assertNotIn(ble._REQUEST_CONNECTED_COMPONENT_FIELD, found)
+
+
 class CloudEncodingAgreementTests(unittest.TestCase):
     """Cross-check the new BLE encoder against the proven cloud encoder.
 

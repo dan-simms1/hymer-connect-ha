@@ -3,17 +3,20 @@
 This runbook is for the standalone token tool only. Do not use it as guidance for
 the Home Assistant integration.
 
-## Early Alpha Warning
+## Status
 
-This runbook is retained as a research note for the standalone token tool.
+**The full pairing flow below has been hardware-verified end to end**
+(2026-08-22): from a Linux/BlueZ host inside the vehicle with no LTE, the
+`PairMobileRequest` completed and minted a remote refresh token over BLE, and a
+subsequent `setValues` returned `status=1` and actuated the load. The one thing
+that had to be right was writing the SCU UART RX **with response** (the app's
+`WRITE_TYPE_DEFAULT`); the tool now defaults to that.
 
-The token tool is **early alpha** and should **not be used yet** for live
-vehicle pairing or production remote-refresh-token minting. The BLE/TLS pairing
-path described below has not been hardware-verified end-to-end in this
-repository.
-
-For actual current use, follow the manual proxy-capture method in the main
-repository README instead.
+`BLE_RUNBOOK.md` is the current, more complete field procedure (host setup,
+`full_pair.sh`, failure signatures) and supersedes the BLE steps here where they
+differ; this file is kept for the cloud-side detail. Live actuation requires
+`CONFIRM=1` and explicit component/value ids. Pass the activation token as a
+`0600` file via `--activation-token-file`, never on the command line.
 
 ## Goal
 

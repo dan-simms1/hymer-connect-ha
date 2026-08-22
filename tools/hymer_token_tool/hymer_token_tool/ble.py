@@ -559,6 +559,40 @@ def build_set_values_topic(values: list[bytes]) -> bytes:
     return _encode_length_delimited_field(_CC_REQUEST_TOPIC_SET_VALUES_FIELD, set_values)
 
 
+def build_user_topic_probe_frame(
+    field_number: int,
+    payload: bytes = b"",
+    *,
+    request_id: int | None = None,
+    timestamp: int | None = None,
+    version: str = APP_PIA_VERSION,
+) -> tuple[bytes, int]:
+    """Build a Request carrying a single UserRequestTopic sub-field. Returns (frame, request_id).
+
+    UserRequestTopic is Request field 8; its sub-fields are the account/device
+    management commands. Field 4 is pairMobileDevice and 6 is its confirmation
+    (both already implemented); others include getPairedMobileDevices,
+    deleteMobileDevices, deleteUser and deleteAllUsers, whose field numbers are
+    not known from the decompiled app. This builder lets one field be probed at
+    a time under operator control.
+
+    WARNING: some UserRequestTopic sub-fields are destructive (deleteUser,
+    deleteAllUsers). Never sweep a range blindly. The CLI that uses this refuses
+    to send without explicit acknowledgement.
+    """
+    resolved_request_id = app_like_request_id() if request_id is None else request_id
+    user_topic = _encode_length_delimited_field(field_number, payload)
+    frame_payload = build_ble_protocol_request_payload(
+        build_request_message(
+            user_topic,
+            request_id=resolved_request_id,
+            timestamp=app_like_request_timestamp() if timestamp is None else timestamp,
+            version=version,
+        )
+    )
+    return encode_ble_pia_frame(frame_payload), resolved_request_id
+
+
 def build_set_values_ble_pia_frame(
     values: list[bytes],
     *,
@@ -861,7 +895,14 @@ async def probe_device(
     """Connect to one BLE device and return its services/characteristics."""
     _require_bleak()
     async with BleakClient(identifier, timeout=timeout) as client:
-        services = await client.get_services()
+        services = getattr(client, "services", None)
+        if services is None:
+            getter = getattr(client, "get_services", None)  # bleak < 3
+            if getter is None:
+                raise BleSupportError(
+                    "This bleak version exposes neither `services` nor `get_services()`"
+                )
+            services = await getter()
         records: list[ServiceRecord] = []
         for service in services:
             characteristics = [

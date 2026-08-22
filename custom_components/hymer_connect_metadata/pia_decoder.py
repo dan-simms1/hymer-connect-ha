@@ -75,9 +75,20 @@ _KEEPALIVE_REQUEST_ID_MIN = 10_000_001
 _KEEPALIVE_REQUEST_ID_MAX = 10_999_999
 
 
-# Cloud DataHub response statuses reverse-engineered from the app transport
-# protocol. Only the values used by the live SignalR path are named here.
+# The complete PIA response status enum, read from the decompiled app on
+# 2026-08-22 (bundle.js byte 19,151,699). The same enum is used by both the
+# cloud DataHub transport and the BLE PIA transport.
+STATUS_NO_STATUS = 0
 STATUS_SUCCESS = 1
+STATUS_INVALID_INPUT = 2
+STATUS_INTERNAL_ERROR = 3
+STATUS_INVALID_PROTOCOL_VERSION = 4
+STATUS_ACCESS_DENIED = 5
+STATUS_TOKEN_EXPIRED = 6
+STATUS_NOT_FOUND = 7
+STATUS_UNAVAILABLE = 8
+STATUS_INVALID_SIZE = 9
+STATUS_MAIN_USER_ALREADY_PAIRED = 10
 STATUS_MAIN_USER_CANNOT_ACCEPT_INVITATION = 11
 STATUS_AUTH_TOKEN_EXPIRED = 12
 STATUS_REMOTE_TOKEN_EXPIRED = 13
@@ -86,6 +97,7 @@ STATUS_SCU_IS_NOT_ONLINE = 15
 STATUS_CALL_TO_SCU_FAILED = 16
 STATUS_CLOUD_ERROR = 17
 STATUS_CONNECTIVITY_ISSUE = 18
+STATUS_BACKEND_SERVICE_ERROR = 19
 
 #: Statuses that mean "the vehicle or the cloud could not service this request
 #: right now", as opposed to "this session is invalid". They say nothing about

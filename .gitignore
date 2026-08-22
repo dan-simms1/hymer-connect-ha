@@ -50,3 +50,12 @@ test_signalr.py
 docs/backlog.md
 docs/release-plan.md
 custom_components/decode_cmds.py
+
+# Field-session secrets for the token tool (matched at any depth)
+activation.txt
+creds.ini
+remote-refresh.txt
+pair-session.json
+
+# Local BLE field bundle: scripts + pairing secrets for the Pi. Never commit.
+/field-local/

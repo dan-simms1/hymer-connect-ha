@@ -6,6 +6,14 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
+- `1.0.30` — completes the PIA status enum, adds bleak 3.x support and the
+  Linux-host BLE field tooling; secrets via `0600` files only, actuation gated
+  on explicit confirmation and target ids. **BLE pairing and control now work
+  end to end against the vehicle with no LTE**: from a Linux host in the van a
+  `PairMobileRequest` minted a remote refresh token over BLE and a `setValues`
+  write returned SUCCESS and actuated the load. The fix was writing the SCU
+  UART RX with-response (the app's `WRITE_TYPE_DEFAULT`); without it a pairing
+  request overran the SCU buffer at low MTU and was dropped.
 - `1.0.29` — keeps a working SignalR connection when a single subscription
   fails with a transient status such as `SCU_IS_NOT_ONLINE`, instead of tearing
   it down and leaving the vehicle uncontrollable while LTE is marginal.
