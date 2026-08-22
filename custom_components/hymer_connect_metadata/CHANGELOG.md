@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.31] - 2026-08-22
+
+### Changed
+
+- `APP_VERSION` bumped `2.10.14` -> `2.10.16` to match the current app. Verified
+  against the decompiled 2.10.16 bundle that every endpoint the token tool uses
+  (`/api/v2/oauth/token`, `/api/ehg/v1/accounts/*`, `.../vehicles/byToken`,
+  `.../remoteAccessToken`, `/api/rv-twin/vehicles`), the OAuth client
+  credentials, and the PIA version (`v0.32.0`) are unchanged - so the extractor
+  is current. The only app-side changes are additive (sub-user invitation
+  endpoints, new component types for other vehicles) and do not affect it.
+
 ## [1.0.30] - 2026-08-22
 
 ### Fixed

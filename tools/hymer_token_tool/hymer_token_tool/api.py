@@ -14,7 +14,7 @@ import aiohttp
 API_BASE_URL = "https://smartrv.erwinhymergroup.com"
 API_BASE_URL_SCC = "https://scc-api.smartrv.erwinhymergroup.com"
 USER_AGENT = "okhttp/4.10.0"
-APP_VERSION = "2.10.14"
+APP_VERSION = "2.10.16"
 SIGNALR_NEGOTIATE_PATH = "/datahub/negotiate"
 ENDPOINT_AUTH = "/api/v2/oauth/token"
 ENDPOINT_ACCOUNTS_ME = "/api/ehg/v1/accounts/me"

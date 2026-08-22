@@ -6,6 +6,9 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
+- `1.0.31` — bumps `APP_VERSION` to 2.10.16 after verifying against the
+  decompiled current app that all extractor endpoints, OAuth creds and the PIA
+  version are unchanged; app-side changes are additive and don't affect us.
 - `1.0.30` — completes the PIA status enum, adds bleak 3.x support and the
   Linux-host BLE field tooling; secrets via `0600` files only, actuation gated
   on explicit confirmation and target ids. **BLE pairing and control now work
