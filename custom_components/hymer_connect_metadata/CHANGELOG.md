@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-22
+
+### Added
+
+- **Local BLE transport — control the vehicle over Bluetooth, and mint the
+  cloud key from within Home Assistant.** Built clean-room from our own proven
+  encoder (the token tool, verified on a real vehicle 2026-08-22), applying the
+  Home-Assistant wiring pattern rather than any upstream code, and including the
+  working BLE writes the prior art was missing.
+
+  New modules in the integration:
+  - `ble_pia.py` — PIA framing, TLS envelope, `setValues`, pairing and response
+    decode; byte-identical to the proven tool encoder (a parity test guards it).
+    Commands are wrapped as `BleProtocol.request` (field 1), the fix that makes
+    the SCU accept them.
+  - `ble_tls.py` — the legacy TLS 1.0/1.1 engine over `ssl.MemoryBIO`.
+  - `ble_transport.py` — `HymerBleTransport`, wired into HA's Bluetooth stack
+    (`async_ble_device_from_address` + `bleak-retry-connector`, raw-bleak
+    fallback). Bonds via a device-locked `NoInputNoOutput` D-Bus pairing agent
+    on the system bus (`dbus_fast`, which ships with HA), acquires a larger MTU
+    like the app, and uses write-with-response. Implements the same
+    `send_light_command` / `send_multi_sensor_command` surface as the cloud
+    client, plus `pair_mobile` and an `async_pair_over_ble` helper.
+
+- **Transport selection in the coordinator.** With BLE enabled, control
+  commands try BLE and cloud in the configured order: `fallback` (cloud first,
+  BLE when the cloud path fails — a home HA near the van) or `primary` (BLE
+  first, cloud fallback — a van-local HA). Raw PIA requests, slot actions and
+  restart stay on the cloud. BLE is **off by default**; existing cloud-only
+  behaviour is unchanged.
+
+- **Options**: `ble_enabled`, `ble_address`, `ble_mode`.
+
+- **Reconfigure now mints the remote-access refresh token over BLE.** Provide
+  the vehicle's QR activation token and the SCU's Bluetooth address, press the
+  vehicle's CONNECTION button, and the flow bonds, does the TLS handshake and
+  the `PairMobileRequest`, and stores the minted token — no proxy capture and
+  no external tool.
+
+### Changed
+
+- `manifest.json` gains `after_dependencies: ["bluetooth"]` (soft — Bluetooth is
+  set up first when present, but cloud-only installs without an adapter still
+  load) and `get_confirmation_token_value()` on the cloud API.
+
+### Notes
+
+- The BLE bonding and the on-vehicle pairing/control paths are hardware-verified
+  from a standalone Linux host but **not yet re-verified through the HA
+  integration on a live vehicle**. Bonding needs a *local* BlueZ adapter and
+  cannot work over a remote Bluetooth proxy.
+
 ## [1.0.31] - 2026-08-22
 
 ### Changed

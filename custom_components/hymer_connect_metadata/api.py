@@ -301,6 +301,16 @@ class HymerConnectApi:
         url = f"{API_BASE_URL}{ENDPOINT_CONFIRMATION_TOKEN}"
         return await self._request("POST", url, headers=self._main_api_headers())
 
+    async def get_confirmation_token_value(self) -> str:
+        """Return just the confirmation-token string used by BLE pairing."""
+        result = await self.get_confirmation_token()
+        token = result.get("token") if isinstance(result, dict) else None
+        if not isinstance(token, str) or not token:
+            raise HymerConnectApiError(
+                "Confirmation token response did not include a token"
+            )
+        return token
+
     async def get_remote_access_token(
         self, vehicle_urn: str, refresh_token: str
     ) -> str:

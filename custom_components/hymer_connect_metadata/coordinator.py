@@ -24,6 +24,11 @@ from .capability_resolver import main_switch_slots
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 
 from .const import (
+    BLE_MODE_FALLBACK,
+    BLE_MODE_PRIMARY,
+    CONF_BLE_ADDRESS,
+    CONF_BLE_ENABLED,
+    CONF_BLE_MODE,
     CONF_VEHICLE_ID,
     CONF_VEHICLE_MODEL,
     CONF_VEHICLE_MODEL_GROUP,
@@ -158,6 +163,9 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             Callable[[set[tuple[int, int]]], Awaitable[None]],
         ] = {}
         self._signalr_commands = _SignalRCommandProxy(self)
+        # Local BLE transport (created lazily when enabled in options).
+        self._ble: Any = None
+        self._ble_start_lock: asyncio.Lock | None = None
         super().__init__(
             hass,
             _LOGGER,
@@ -607,39 +615,124 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_ensure_signalr_healthy()
         return self._signalr_commands
 
+    # Commands the BLE transport can carry (it speaks setValues). Everything
+    # else (raw PIA requests, slot actions, restart) stays on the cloud path.
+    _BLE_ROUTABLE = frozenset({"send_light_command", "send_multi_sensor_command"})
+
+    def _transport_order(self, method_name: str) -> list[str]:
+        """Ordered transports to try for one command, honouring the BLE option."""
+        options = getattr(self.config_entry, "options", None) or {}
+        ble_ready = (
+            method_name in self._BLE_ROUTABLE
+            and options.get(CONF_BLE_ENABLED, False)
+            and bool(options.get(CONF_BLE_ADDRESS))
+        )
+        if not ble_ready:
+            return ["cloud"]
+        if options.get(CONF_BLE_MODE, BLE_MODE_FALLBACK) == BLE_MODE_PRIMARY:
+            return ["ble", "cloud"]
+        return ["cloud", "ble"]
+
     async def _send_with_retry(
         self,
         method_name: str,
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        """Send one command, reconnecting and retrying once on failure."""
+        """Send one command over the configured transports, in order."""
+        for transport in self._transport_order(method_name):
+            if transport == "cloud":
+                if await self._try_cloud_send(method_name, *args, **kwargs):
+                    return
+            elif transport == "ble":
+                if await self._try_ble_send(method_name, *args, **kwargs):
+                    return
+        raise HomeAssistantError(
+            "Command failed on all transports. Try reloading the integration."
+        )
+
+    async def _try_cloud_send(self, method_name: str, *args: Any, **kwargs: Any) -> bool:
+        """Cloud path: reconnect + retry once. Returns True on success."""
         for attempt in range(2):
-            client = await self.async_ensure_signalr_healthy()
+            try:
+                client = await self.async_ensure_signalr_healthy()
+            except HomeAssistantError:
+                return False
             method = getattr(client, method_name)
             try:
                 ok = await method(*args, **kwargs)
             except Exception:
                 ok = False
                 _LOGGER.warning(
-                    "%s raised for %s on attempt %d",
-                    method_name,
-                    self.config_entry.title,
-                    attempt + 1,
-                    exc_info=True,
+                    "%s raised on cloud for %s on attempt %d",
+                    method_name, self.config_entry.title, attempt + 1, exc_info=True,
                 )
             if ok:
-                return
+                return True
             if attempt == 0:
                 _LOGGER.warning(
-                    "%s send failed for %s — reconnecting for one retry",
-                    method_name,
-                    self.config_entry.title,
+                    "%s cloud send failed for %s — reconnecting for one retry",
+                    method_name, self.config_entry.title,
                 )
                 client.mark_disconnected()
-        raise HomeAssistantError(
-            "Command failed after reconnect and retry. Try reloading the integration."
-        )
+        return False
+
+    async def _try_ble_send(self, method_name: str, *args: Any, **kwargs: Any) -> bool:
+        """BLE path: ensure a session and send once. Returns True on success."""
+        transport = await self._ensure_ble()
+        if transport is None:
+            return False
+        try:
+            ok = await getattr(transport, method_name)(*args, **kwargs)
+        except Exception:
+            _LOGGER.warning(
+                "%s raised on BLE for %s — tearing down BLE session",
+                method_name, self.config_entry.title, exc_info=True,
+            )
+            await self._stop_ble()
+            return False
+        if not ok:
+            # A rejected/failed write leaves the session usable; keep it.
+            _LOGGER.info("%s not accepted over BLE for %s", method_name, self.config_entry.title)
+        return bool(ok)
+
+    async def _ensure_ble(self) -> Any:
+        """Return a connected BLE transport, connecting under a lock if needed."""
+        if self._ble is not None and getattr(self._ble, "connected", False):
+            return self._ble
+        if self._ble_start_lock is None:
+            self._ble_start_lock = asyncio.Lock()
+        async with self._ble_start_lock:
+            if self._ble is not None and getattr(self._ble, "connected", False):
+                return self._ble
+            await self._stop_ble()
+            address = self.config_entry.options.get(CONF_BLE_ADDRESS)
+            if not address:
+                return None
+            try:
+                from .ble_transport import HymerBleTransport
+
+                transport = HymerBleTransport(self.hass, address)
+                await transport.start()
+            except Exception as err:  # noqa: BLE001 - BLE may be out of range/asleep
+                _LOGGER.warning(
+                    "BLE transport could not start for %s: %s",
+                    self.config_entry.title, err,
+                )
+                self._ble = None
+                return None
+            self._ble = transport
+            _LOGGER.info("BLE transport connected for %s", self.config_entry.title)
+            return transport
+
+    async def _stop_ble(self) -> None:
+        transport = getattr(self, "_ble", None)
+        self._ble = None
+        if transport is not None:
+            try:
+                await transport.stop()
+            except Exception as err:  # noqa: BLE001 - best effort
+                _LOGGER.debug("BLE transport stop error: %s", err)
 
     async def async_send_light_command(
         self,
@@ -905,6 +998,7 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._capability_reload_slots.clear()
         self._cancel_reconnect_task()
         self._suppress_connection_lost_refresh = True
+        await self._stop_ble()
         if self._signalr:
             try:
                 await self._signalr.stop()

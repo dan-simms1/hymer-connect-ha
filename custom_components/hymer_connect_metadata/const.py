@@ -80,6 +80,16 @@ CONF_SHOW_DEBUG_DIAGNOSTICS = "show_debug_diagnostics"
 CONF_USE_MILES = "use_miles"
 CONF_USE_FAHRENHEIT = "use_fahrenheit"
 
+# BLE local transport
+CONF_BLE_ENABLED = "ble_enabled"
+CONF_BLE_ADDRESS = "ble_address"
+CONF_BLE_MODE = "ble_mode"
+CONF_QR_TOKEN = "qr_token"  # vehicle QR activation token, for BLE pairing
+#: cloud is tried first, BLE is the fallback (home HA near the van, LTE flaky)
+BLE_MODE_FALLBACK = "fallback"
+#: BLE is tried first, cloud is the fallback (a van-local HA)
+BLE_MODE_PRIMARY = "primary"
+
 # Platforms — discovery-driven. `cover`, `fan`, and `scene` are template-only
 # platforms; `number` handles writable numeric slots from the raw layer.
 PLATFORMS = [

@@ -23,6 +23,12 @@ from .const import (
     CONF_BRAND,
     CONF_EHG_REFRESH_TOKEN,
     CONF_REFRESH_TOKEN,
+    BLE_MODE_FALLBACK,
+    BLE_MODE_PRIMARY,
+    CONF_BLE_ADDRESS,
+    CONF_BLE_ENABLED,
+    CONF_BLE_MODE,
+    CONF_QR_TOKEN,
     CONF_SHOW_ADMIN_ACTIONS,
     CONF_SHOW_DEBUG_DIAGNOSTICS,
     CONF_SCU_URN,
@@ -326,6 +332,8 @@ class HymerConnectConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             ehg_refresh_token = user_input.get(CONF_EHG_REFRESH_TOKEN, "").strip()
+            qr_token = user_input.get(CONF_QR_TOKEN, "").strip()
+            ble_address = user_input.get(CONF_BLE_ADDRESS, "").strip()
             vehicle: dict[str, Any] | None = None
             try:
                 api, tokens = await self._async_authenticate_api(
@@ -336,6 +344,20 @@ class HymerConnectConfigFlow(ConfigFlow, domain=DOMAIN):
                 vehicle = await self._async_resolve_entry_vehicle(api, entry)
                 if vehicle is None:
                     errors["base"] = "vehicle_not_found"
+                elif qr_token and ble_address:
+                    # Mint the remote-access refresh token by pairing over BLE.
+                    # The user must press the vehicle's CONNECTION button first.
+                    from .ble_transport import BleTransportError, async_pair_over_ble
+
+                    try:
+                        result = await async_pair_over_ble(
+                            self.hass, api, ble_address, qr_token
+                        )
+                    except BleTransportError:
+                        _LOGGER.warning("BLE pairing failed", exc_info=True)
+                        errors["base"] = "ble_pairing_failed"
+                    else:
+                        ehg_refresh_token = result["ehg_refresh_token"]
                 elif ehg_refresh_token:
                     vehicle_urn = vehicle.get("vehicle_urn", "")
                     if not vehicle_urn:
@@ -379,6 +401,8 @@ class HymerConnectConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_EHG_REFRESH_TOKEN,
                         default=entry.data.get(CONF_EHG_REFRESH_TOKEN, ""),
                     ): str,
+                    vol.Optional(CONF_QR_TOKEN, default=""): str,
+                    vol.Optional(CONF_BLE_ADDRESS, default=""): str,
                 }
             ),
             errors=errors,
@@ -417,6 +441,18 @@ class HymerConnectOptionsFlow(OptionsFlowWithReload):
                 CONF_USE_FAHRENHEIT,
                 False,
             ),
+            CONF_BLE_ENABLED: self._config_entry.options.get(
+                CONF_BLE_ENABLED,
+                False,
+            ),
+            CONF_BLE_ADDRESS: self._config_entry.options.get(
+                CONF_BLE_ADDRESS,
+                "",
+            ),
+            CONF_BLE_MODE: self._config_entry.options.get(
+                CONF_BLE_MODE,
+                BLE_MODE_FALLBACK,
+            ),
         }
         return self.async_show_form(
             step_id="init",
@@ -438,6 +474,18 @@ class HymerConnectOptionsFlow(OptionsFlowWithReload):
                         CONF_USE_FAHRENHEIT,
                         default=options[CONF_USE_FAHRENHEIT],
                     ): bool,
+                    vol.Optional(
+                        CONF_BLE_ENABLED,
+                        default=options[CONF_BLE_ENABLED],
+                    ): bool,
+                    vol.Optional(
+                        CONF_BLE_ADDRESS,
+                        default=options[CONF_BLE_ADDRESS],
+                    ): str,
+                    vol.Optional(
+                        CONF_BLE_MODE,
+                        default=options[CONF_BLE_MODE],
+                    ): vol.In([BLE_MODE_FALLBACK, BLE_MODE_PRIMARY]),
                 }
             ),
         )

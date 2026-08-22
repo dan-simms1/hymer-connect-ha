@@ -6,6 +6,12 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
+- `1.1.0` — adds a local BLE transport to the integration: control the vehicle
+  over Bluetooth (with cloud/BLE transport selection) and mint the remote-access
+  token by pairing over BLE from the reconfigure flow. Built from our own proven
+  encoder with the working writes the prior art lacked. BLE is off by default;
+  cloud-only behaviour is unchanged. HA-integration BLE paths not yet re-verified
+  on a live vehicle.
 - `1.0.31` — bumps `APP_VERSION` to 2.10.16 after verifying against the
   decompiled current app that all extractor endpoints, OAuth creds and the PIA
   version are unchanged; app-side changes are additive and don't affect us.
