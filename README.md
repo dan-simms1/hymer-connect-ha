@@ -112,12 +112,13 @@ You should be comfortable with all of the following:
 
 ## Installation Overview
 
-There are four steps:
-
-1. install the integration
-2. generate the runtime metadata zip
-3. copy that zip into your Home Assistant config directory and unzip it
-4. add the integration in Home Assistant and sign in
+1. **Install the integration** (HACS or manual).
+2. **Provide the runtime metadata pack** — Home Assistant builds it for you from
+   your HYMER APK URL (no external tools, no zip to copy).
+3. **Add the integration and sign in** with your HYMER / EHG account.
+4. **Pair over Bluetooth to mint the remote-access token** — Bluetooth is
+   required for initial pairing, and that token is what enables live telemetry
+   and control. This needs a local Bluetooth adapter near the van.
 
 ## 1. Install The Integration
 
@@ -143,225 +144,115 @@ updates and will not offer this project's `v1.x` releases.
    `custom_components/` directory.
 2. Restart Home Assistant.
 
-## 2. Generate The Runtime Metadata Zip
+## 2. Provide The Runtime Metadata Pack
 
-The integration expects a local metadata pack under:
+The integration needs a local metadata pack under
+`/config/custom_components/hymer_connect_metadata/data/` to interpret your
+vehicle. **Home Assistant builds it for you — no external toolchain, no zip.**
 
-- `/config/custom_components/hymer_connect_metadata/data/`
+When the pack is missing, the integration raises a fixable **Repair** issue.
+Open it and paste a **direct `https://` URL to your HYMER Android APK**; Home
+Assistant downloads it and reconstructs the catalogs and the local OAuth client
+straight from the app's Hermes bytecode, in-process (pure Python — no
+decompiler). You can rebuild the pack any time from the integration's
+**Configure → options** dialog.
 
-> [!TIP]
-> **Easiest: let Home Assistant build the pack itself.** If the pack is missing,
-> the integration raises a fixable **Repair** issue — paste a direct **`https://`**
-> URL to your HYMER APK and Home Assistant reconstructs the catalogs and the
-> OAuth client from the app's bytecode in-process (pure Python, no decompiler,
-> no external toolchain). You can also rebuild it any time from the integration's
-> **Configure → options** dialog. The steps below are the offline alternative if
-> you would rather not have Home Assistant fetch the APK.
+- The URL must return the **`.apk` file itself**, not a web page. To identify
+  the official app, check its Google Play listing and confirm the package name
+  `com.ehg.hymerconnect`:
 
-Generate that pack from a full checkout of this repository with:
+  ```text
+  https://play.google.com/store/apps/details?id=com.ehg.hymerconnect
+  ```
 
-```bash
-python3 scripts/prepare_runtime_metadata.py \
-  --apk-url <apk-url> \
-  --zip-out hymer_connect_metadata_runtime_metadata.zip
-```
+  Play does not serve the `.apk` directly, so download it from a source you
+  trust. This repository does not endorse a specific mirror.
 
-The generated pack now includes:
+- The pack includes a local-only `oauth_client.json`, derived from your own app
+  artefact and used for cloud sign-in. It stays on your Home Assistant instance
+  and is never shipped in git — keep it local.
 
-- the runtime slot/component metadata
-- a local-only `oauth_client.json` file derived from the same app artefact and
-  used for cloud account sign-in
+> [!NOTE]
+> **Archived (advanced): offline generation.** Building the pack outside Home
+> Assistant with `scripts/prepare_runtime_metadata.py` and copying a zip in is an
+> older, archived path kept only for air-gapped or advanced setups — it is no
+> longer the recommended flow. See
+> [docs/runtime-metadata.md](docs/runtime-metadata.md) if you specifically need it.
 
-That `oauth_client.json` file is intentionally not tracked in git. Treat the
-generated zip as local-only and do not share or publish it.
-
-`--apk-url` must be a **direct APK download URL**, not a web page about the
-APK.
-
-If you already downloaded the APK file locally, `--apk-path` is usually
-easier:
-
-```bash
-python3 scripts/prepare_runtime_metadata.py \
-  --apk-path ~/Downloads/com.ehg.hymerconnect.apk \
-  --zip-out hymer_connect_metadata_runtime_metadata.zip
-```
-
-Example direct-download shape:
-
-```text
-https://downloads.example.invalid/path/to/com.ehg.hymerconnect.apk
-```
-
-If the website only gives you a landing page or starts the download inside the
-browser, save the APK locally first and then use `--apk-path`.
-
-To identify the correct Android app, start from the official Google Play
-listing for HYMER Connect and confirm the package name:
-
-```text
-https://play.google.com/store/apps/details?id=com.ehg.hymerconnect
-```
-
-If you need an APK file for the metadata-preparation workflow:
-
-1. confirm the package name is `com.ehg.hymerconnect`
-2. obtain the APK from a source you consider trustworthy
-3. download it locally
-4. pass the local file to `--apk-path`
-
-Popular third-party APK mirrors exist, but this repository does not endorse a
-specific one.
-
-If you are working from a downloaded file, use `--apk-path`.
-
-The script reconstructs the app's Hermes bytecode with a built-in pure-Python
-reader, so **no decompiler is required** for a normal APK — just point it at the
-file. (The older `--hbc-decompiler` / `--bundle-js` options still exist for
-anyone who already has a pseudo-JS bundle, but they are optional.)
-
-Further detail:
-
-- [docs/runtime-metadata.md](docs/runtime-metadata.md)
-- [custom_components/hymer_connect_metadata/data/README.md](custom_components/hymer_connect_metadata/data/README.md)
-
-## 3. Copy The Zip Into Home Assistant And Unzip It
-
-The generated zip already contains the correct folder layout. You do not need
-to create the subdirectories manually.
-
-> [!WARNING]
-> The generated zip is no longer just neutral metadata. It now also contains
-> locally derived app OAuth client auth in `oauth_client.json` so Home
-> Assistant can sign in without this repository shipping that material in git.
-> Keep the zip local and do not publish or redistribute it.
-
-Typical **Home Assistant OS / Supervised** flow:
-
-1. copy `hymer_connect_metadata_runtime_metadata.zip` into `/config`
-   using Samba, the Studio Code Server add-on, SSH/SFTP, or another file
-   transfer method
-2. open the Terminal & SSH add-on or another shell on the HA host
-3. run:
-
-```bash
-cd /config
-unzip -o hymer_connect_metadata_runtime_metadata.zip
-```
-
-4. restart Home Assistant or reload the integration
-
-Typical **Home Assistant Container / Core** flow:
-
-1. copy the zip to the machine that holds your HA config directory
-2. change into that config directory
-3. run:
-
-```bash
-unzip -o /path/to/hymer_connect_metadata_runtime_metadata.zip
-```
-
-4. restart Home Assistant or reload the integration
-
-## 4. Add The Integration In Home Assistant
+## 3. Add The Integration And Sign In
 
 1. Go to **Settings > Devices & Services**.
 2. Add **HYMER Connect Metadata**.
 3. Select your brand.
 4. Enter your HYMER Connect username and password.
 5. Select the campervan or motorhome to add.
-6. Optionally paste the **EHG remote-access refresh token**.
 
-If you skip the remote-access refresh token:
+At this point the config entry exists and REST-backed vehicle identity metadata
+can load, but **live telemetry and control need the remote-access token** — mint
+it in the next step by pairing over Bluetooth. (If you already have a token from
+another source, you can paste it during setup or later via **Reconfigure**.)
 
-- the config entry can still be created
-- REST-backed vehicle identity metadata can still load
-- live telemetry and live control will not work
+## 4. Mint The Remote-Access Token Over Bluetooth
 
-You can add or replace that token later through **Reconfigure**.
+Bluetooth pairing is how you mint the vehicle's remote-access token from Home
+Assistant — it is a required part of first-time setup for live telemetry and
+control.
 
-## Bluetooth (BLE) — control and pairing
+1. Open the integration's **Reconfigure** flow.
+2. Enter the vehicle's **QR activation-code** text and the SCU's **Bluetooth
+   address**.
+3. Press the **CONNECTION** button on the vehicle, then submit.
 
-The integration includes an optional local BLE transport. It is **off by
-default**; a cloud-only install without a Bluetooth adapter is unaffected.
+Home Assistant bonds with the SCU, performs the TLS handshake and the pairing
+exchange, and stores the minted refresh token — no proxy capture and no external
+tool.
 
-- **Control over Bluetooth.** Enable it in **Options** (`ble_enabled`, the SCU's
-  `ble_address`, and a `ble_mode`: `fallback` tries the cloud first and BLE when
-  the cloud fails — a home HA near the van; `primary` tries BLE first with cloud
-  as backup — a van-local HA). Only value writes (lights, switches, fridge,
-  heater) use BLE; other calls stay on the cloud.
-- **Mint the token over Bluetooth.** In **Reconfigure**, enter the vehicle's QR
-  activation-code text and the SCU's Bluetooth address, press the CONNECTION
-  button on the vehicle, and submit — the integration bonds, does the TLS
-  handshake and the pairing exchange, and stores the minted refresh token. No
-  proxy capture and no external tool.
+Requirements:
 
-BLE bonding needs a **local** BlueZ adapter (HAOS or a Linux host); it cannot
-work over a remote Bluetooth proxy. See
-`tools/hymer_token_tool/BLE_RUNBOOK.md` for the field notes.
-
-## Current Supported Token Workflow
-
-The manual proxy-based capture flow (patched Android APK + `mitmproxy`) remains
-available and is the fallback when Bluetooth is not an option.
-
-At a high level:
-
-1. patch the Android app for local proxy inspection
-2. run `mitmproxy` or `mitmdump`
-3. perform the relevant app flow
-4. capture the `remoteAccessToken` exchange
-
-> [!WARNING]
-> Treat that token like a password. A third party who gets it may be able to
-> access vehicle data and remote functions, including location and
-> configuration details.
-
-## Alternative Desktop Token Tool
+- BLE bonding needs a **local** BlueZ adapter (Home Assistant OS, or a Linux host
+  near the van). It **cannot** work over a remote Bluetooth proxy, and macOS
+  cannot bond on demand.
+- The SCU's legacy TLS profile is used only for that local pairing session; no
+  global OpenSSL / HAOS changes are needed.
 
 > [!NOTE]
-> This tool is **archived and kept for research only**. It lives under
-> `tools/hymer_token_tool/` and is no longer maintained. The supported
-> way to mint the token is now the integration's BLE **Reconfigure** flow (see
-> above); this desktop tool remains as a reference for the proven BLE/TLS
-> pairing exchange.
+> The BLE encoder and pairing exchange were proven end to end against a real
+> vehicle from a Linux/BlueZ host (see
+> [`tools/hymer_token_tool/BLE_RUNBOOK.md`](tools/hymer_token_tool/BLE_RUNBOOK.md)).
+> The in-integration Reconfigure flow uses that same proven exchange; if you hit
+> trouble, the archived desktop tool below is the hands-on-verified fallback.
 
-This repository also includes `tools/hymer_token_tool/`.
+## Bluetooth Control (optional)
 
-The intention of that tool is to provide an **alternative laptop-based way** to
-obtain the remote-access key/token from a **Windows, macOS, or Linux** machine
-instead of relying on the patched-APK + proxy workflow above.
+Beyond pairing, Bluetooth can also carry **control commands** as a local
+transport. This is **off by default**; a cloud-only install without a Bluetooth
+adapter is unaffected.
 
-It is shipped as **early alpha** research code: the BLE pairing and
-token-minting path has been verified end to end against a real vehicle (see
-below), but it is still a research instrument, not a polished one-click
-workflow. It requires a Linux/BlueZ host near the vehicle and several manual
-steps, so treat it as an advanced, hands-on path rather than a turnkey one.
+Enable it in **Options** (`ble_enabled`, the SCU's `ble_address`, and a
+`ble_mode`: `fallback` tries the cloud first and BLE when the cloud fails — a
+home HA near the van; `primary` tries BLE first with cloud as backup — a
+van-local HA). Only value writes (lights, switches, fridge, heater) use BLE;
+other calls stay on the cloud.
 
-The token tool now reads the same locally generated `oauth_client.json` file as
-the integration, so you should run the metadata-preparation step at least once
-from the same repository checkout before using the tool.
+## Getting The Token Without Bluetooth (archived)
 
-For the BLE/TLS path, the tool handles the SCU's legacy TLS profile
-internally. It enables TLS 1.0/1.1 with the older AES-SHA cipher suites for that
-local session and does not require global OpenSSL or HAOS changes. This path has
-been verified end to end against a real vehicle from a Linux/BlueZ host with no
-LTE (pairing, token minting, and a control write); see
-`tools/hymer_token_tool/BLE_RUNBOOK.md`. It still requires a Linux host near the
-vehicle — macOS cannot bond on demand.
+Bluetooth pairing (above) is the supported way to mint the token. Two older
+paths are kept for reference only:
 
-It also includes a local helper for extracting an EHG remote-access refresh token
-from text you already captured yourself:
+- **Proxy capture (archived).** Patching the Android app and capturing the
+  `remoteAccessToken` exchange with `mitmproxy` still works as a manual fallback
+  when Bluetooth is not an option, but it is no longer the recommended flow.
+- **Desktop token tool (archived).** A laptop-based BLE/TLS pairing tool that
+  mints the token from a Linux/BlueZ host near the van. It is unmaintained and
+  research-only; its documentation lives in its own folder:
+  [`tools/hymer_token_tool/`](tools/hymer_token_tool/). It also includes a local
+  helper to extract a token from text you captured yourself
+  (`hymer-token-tool extract-remote-refresh --input-file capture.txt`).
 
-```bash
-hymer-token-tool extract-remote-refresh --input-file capture.txt
-```
-
-That helper scans for JWT-shaped strings, decodes them locally without signature
-verification, and keeps the first token whose payload identifies it as
-`ett=access-refresh`. It writes the token to `remote-access-refresh-token.txt`
-with restrictive file permissions and does not print the token unless you pass
-`--print-token`.
+> [!WARNING]
+> Treat the remote-access token like a password. A third party who obtains it
+> may be able to access vehicle data and remote functions, including location
+> and configuration details.
 
 ## What You Can Expect To See In Home Assistant
 
