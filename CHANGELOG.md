@@ -6,6 +6,10 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
+- `2.0.2` — documentation only: adds a README section explaining what the
+  metadata extraction does and why the pack + OAuth client are not shipped
+  (they are HYMER's own app data; the project ships the capability to
+  reconstruct them locally from your own APK, not the data itself).
 - `2.0.1` — makes in-Home-Assistant metadata provisioning work for a **fresh
   install**: the config flow now asks for a HYMER APK URL as its first step and
   builds the pack (incl `oauth_client.json`) before sign-in, instead of

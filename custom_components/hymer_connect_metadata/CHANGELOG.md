@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-08-23
+
+Documentation only — no integration code change.
+
+- Add a **"Why You Extract The Metadata Yourself"** section to the README that
+  explains what the metadata extraction does and why the pack isn't shipped: the
+  runtime metadata mapping and the OAuth client are HYMER's own app data and not
+  ours to redistribute (`data/` and `oauth_client.json` are never in git), so the
+  project ships the *capability* to reconstruct them locally from your own
+  lawfully-obtained APK rather than the data itself.
+
 ## [2.0.1] - 2026-08-23
 
 Makes the in-Home-Assistant metadata provisioning actually work for a **fresh
