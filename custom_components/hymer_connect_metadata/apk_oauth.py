@@ -224,20 +224,20 @@ def extract_oauth_client(apk_bytes: bytes) -> dict[str, str]:
 
     # Preferred path: reconstruct the object literals and read both credentials
     # from the one config object that contains them (values bound to the same
-    # instruction). Fall back to the anchored byte-scan for non-v96 bundles or
-    # if reconstruction yields no config object.
+    # instruction). Reconstruction is best-effort -- if it is unavailable (e.g.
+    # a non-v96 bundle) we fall back to the anchored byte-scan, which spans
+    # v90-96. A genuine ambiguity from a successful reconstruction (more than one
+    # config object) is a real error and must propagate, not silently fall back.
     try:
         from .apk_hermes import reconstruct_object_literals_from_bundle
 
-        bound = _extract_from_config_object(
-            reconstruct_object_literals_from_bundle(raw)
-        )
-    except OAuthExtractionError:
-        raise
-    except Exception:  # noqa: BLE001 - reconstruction is best-effort; scan is the fallback
-        bound = None
-    if bound is not None:
-        return _client_payload(*bound)
+        objects = reconstruct_object_literals_from_bundle(raw)
+    except Exception:  # noqa: BLE001 - reconstruction unavailable; scan is the fallback
+        objects = None
+    if objects is not None:
+        bound = _extract_from_config_object(objects)
+        if bound is not None:
+            return _client_payload(*bound)
 
     return _extract_oauth_by_scan(raw)
 

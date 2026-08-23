@@ -102,6 +102,33 @@ class ApkProvisionTests(unittest.TestCase):
             # ...and no staging temp files are left behind.
             self.assertEqual(list(data_dir.glob(".*.new")), [])
 
+    def test_atomic_publish_fresh_install_rollback_removes_new_files(self) -> None:
+        # No prior files exist: a mid-swap failure must leave the directory
+        # clean (already-swapped new files removed), not a partial pack.
+        prov = self.prov
+        with TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            real_replace = prov.os.replace
+            calls = {"n": 0}
+
+            def flaky(src, dst):
+                calls["n"] += 1
+                if calls["n"] == 2:
+                    raise OSError("disk full")
+                return real_replace(src, dst)
+
+            prov.os.replace = flaky
+            try:
+                with self.assertRaises(prov.ApkProvisionError):
+                    prov._atomic_publish(
+                        data_dir,
+                        {"a.json": "NEW", "b.json": "NEW", "c.json": "NEW"},
+                    )
+            finally:
+                prov.os.replace = real_replace
+
+            self.assertEqual(sorted(p.name for p in data_dir.iterdir()), [])
+
 
 if __name__ == "__main__":
     unittest.main()

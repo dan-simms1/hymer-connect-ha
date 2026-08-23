@@ -134,10 +134,16 @@ def _atomic_publish(data_dir: Path, serialized: dict[str, str]) -> None:
             os.replace(tmp, final)
             replaced.append(name)
     except (OSError, TypeError) as err:
-        # Roll back any files already swapped, then drop leftover temp files.
+        # Roll back any files already swapped, then drop leftover temp files. A
+        # file that had no prior version (fresh install) is removed rather than
+        # restored, so rollback never leaves a partial new pack behind.
         for name in replaced:
+            final = data_dir / name
             try:
-                (data_dir / name).write_bytes(backups[name])
+                if name in backups:
+                    final.write_bytes(backups[name])
+                else:
+                    final.unlink(missing_ok=True)
             except OSError:
                 _LOGGER.error("Failed to roll back %s after a provisioning error", name)
         for tmp in staged.values():
