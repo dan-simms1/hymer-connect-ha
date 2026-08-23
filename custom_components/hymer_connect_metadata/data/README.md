@@ -42,19 +42,21 @@ land in this folder.
 
 The generated zip is local-only. Do not redistribute it.
 
-If the APK contains a Hermes bytecode bundle, provide a local
-`hbc-decompiler` command so the script can decompile the bytecode into a
-pseudo-JS bundle inside the work directory. This project does not ship that
-tool; the workflow was validated with `hermes-dec` 0.1.3:
+The easiest path needs none of this: Home Assistant can build the pack itself
+from an APK URL, via the Repair issue or the integration's options dialog (see
+`docs/runtime-metadata.md`). A pure-Python Hermes reader reconstructs the
+catalogs and OAuth client directly from the app's bytecode — no decompiler.
+
+The offline script reconstructs the Hermes bundle the same way, so a
+`hbc-decompiler` is no longer required. If you already have a pseudo-JS bundle
+from some other tool you may still pass it with `--bundle-js`, but for a normal
+APK just point the script at the file:
 
 ```bash
 python3 scripts/prepare_runtime_metadata.py \
   --apk-path /path/to/com.ehg.hymerconnect.apk \
-  --hbc-decompiler /path/to/hbc-decompiler \
   --zip-out hymer_connect_metadata_runtime_metadata.zip
 ```
-
-If you already generated a pseudo-JS bundle yourself, use `--bundle-js` instead.
 
 If you have a full checkout of this repository on the Home Assistant host
 itself, you can write them directly into the HA config directory with:

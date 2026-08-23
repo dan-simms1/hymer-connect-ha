@@ -623,6 +623,16 @@ class HymerConnectOptionsFlow(OptionsFlowWithReload):
                         "Metadata provisioning from APK failed", exc_info=True
                     )
                     errors["base"] = "provision_failed"
+                else:
+                    # The pack is global, not per-entry: reload EVERY HYMER entry
+                    # so they all rebuild from the new metadata (each setup
+                    # re-invalidates the shared caches). OptionsFlowWithReload
+                    # only handles the current entry, and its plain-OptionsFlow
+                    # fallback reloads nothing at all.
+                    for existing in self.hass.config_entries.async_entries(DOMAIN):
+                        self.hass.async_create_task(
+                            self.hass.config_entries.async_reload(existing.entry_id)
+                        )
 
             if not errors:
                 return self.async_create_entry(title="", data=user_input)

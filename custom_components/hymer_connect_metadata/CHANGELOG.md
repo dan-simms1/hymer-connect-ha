@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0b3] - 2026-08-23
+
+Security and robustness hardening of the in-Home-Assistant APK provisioning,
+from a full external review of the 2.0.0 beta. The APK bytes are untrusted
+input parsed inside the HA process, so this pass makes every read and every
+reconstruction bounded and fail-closed. No behaviour change for a normal,
+trusted APK; existing installs are unaffected.
+
+### Security
+
+- Bound the untrusted Hermes bundle end to end: cap the *uncompressed* bundle
+  size and compression ratio before reading it (zip-bomb defence — the download
+  cap only ever covered the compressed APK), and validate every header-derived
+  section offset against the file length so a crafted count cannot drive an
+  unbounded read.
+- Cap the reconstruction itself: reject attacker-controlled array indices and
+  bound total array fills, object count and decoded instructions, so a tiny
+  bundle can no longer balloon memory via `PutOwnByIndex`.
+- Make the object-graph cleanup iterative, depth- and node-bounded, and stop
+  raising the process-wide Python recursion limit — a crafted deep/cyclic graph
+  is now truncated instead of crashing the interpreter.
+- Require an **HTTPS** APK URL and validate strong catalog invariants before
+  publishing, so a malicious mirror or MITM cannot overwrite a working pack.
+- Publish the eight pack files **transactionally** under a lock, with rollback,
+  so an interrupted or concurrent provision can never leave a half-old/half-new
+  pack; wrap filesystem errors as `ApkProvisionError`.
+
+### Fixed
+
+- Reconstruction no longer leaks stale register values into objects: unmodelled
+  value-producing opcodes are invalidated, and property reads (`GetById`) are
+  resolved against reconstructed enums. Vehicle **group** now recovers its real
+  name (CamperVan, Integrated, …) instead of a stale `0`. Reconstruction is
+  pinned to Hermes v96 (the version whose opcode table it uses).
+- OAuth credentials are bound from the **same** config object (via the
+  reconstruction) rather than by scanning the value buffer, so unrelated
+  adjacent strings can't be mistaken for the client secret.
+- Recover light-circuit/group/module display names from the reconstructed
+  objects (previously dropped on the APK path, degrading ~38 names).
+- A `scenario` and a `scene` that share a key (e.g. `GOOD_MORNING`) get distinct
+  entity ids (keyed by kind + id + key) with a registry migration, instead of
+  one silently shadowing the other.
+- Rebuilding the pack from the options dialog now reloads **every** HYMER entry,
+  not just the current one (the pack is global).
+- Narrow the BMS "time remaining" sentinel filter to the battery-time slot and
+  an exact integral `32767`/`65535`, so a genuine minute reading is never hidden.
+- `executable_for_vehicle` now means "has ≥1 supported action" (matching what is
+  actually exposed); the strict all-actions sense moves to
+  `fully_executable_for_vehicle`.
+
 ## [2.0.0b2] - 2026-08-23
 
 Battery, scenario and dashboard fixes on the 2.0.0 beta (all generic across van

@@ -25,6 +25,20 @@ _ICON_MAP = {
 }
 
 
+def _scene_unique_id(entry: ConfigEntry, scenario: dict[str, Any]) -> str:
+    """Stable id keyed by (kind, id, key).
+
+    The runtime catalog can hold a ``scenario`` and a ``scene`` with the same
+    ``key`` (e.g. GOOD_MORNING); keying by ``key`` alone collapses them onto one
+    entity, so one silently disappears. Including kind + id keeps them distinct.
+    """
+    kind = str(scenario.get("kind", "scenario")).lower()
+    ident = str(scenario.get("id", "")).lower()
+    key = str(scenario.get("key", "scenario")).lower()
+    parts = [part for part in (kind, ident, key) if part]
+    return f"{entry.entry_id}_scene_" + "_".join(parts)
+
+
 def _icon_for(entry: dict[str, Any]) -> str:
     icon = entry.get("icon")
     key = str(entry.get("key", "")).lower()
@@ -51,16 +65,25 @@ class HymerScenarioScene(
     ) -> None:
         super().__init__(coordinator)
         self._scenario = scenario
-        key = str(scenario.get("key", "scenario")).lower()
-        self._scenario_key = str(scenario.get("key", "scenario"))
-        self._attr_unique_id = f"{entry.entry_id}_scene_{key}"
-        self._attr_name = str(scenario.get("name", key.replace("_", " ").title()))
+        key = str(scenario.get("key", "scenario"))
+        self._scenario_key = key
+        self._scenario_kind = str(scenario.get("kind", "scenario"))
+        self._scenario_id = str(scenario.get("id", ""))
+        self._attr_unique_id = _scene_unique_id(entry, scenario)
+        self._attr_name = str(scenario.get("name", key.lower().replace("_", " ").title()))
         self._attr_icon = _icon_for(scenario)
         self._attr_device_info = root_device_info(entry)
 
+    def _matches(self, scenario: dict[str, Any]) -> bool:
+        return (
+            str(scenario.get("key")) == self._scenario_key
+            and str(scenario.get("kind", "scenario")) == self._scenario_kind
+            and str(scenario.get("id", "")) == self._scenario_id
+        )
+
     def _current_scenario(self) -> dict[str, Any] | None:
         for scenario in resolved_scenarios(self.coordinator.active_slots):
-            if str(scenario.get("key")) == self._scenario_key:
+            if self._matches(scenario):
                 return scenario
         return None
 
@@ -100,6 +123,38 @@ class HymerScenarioScene(
         await client.send_slot_actions(list(scenario.get("actions", [])))
 
 
+def _migrate_scene_unique_ids(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    scenarios: list[dict[str, Any]],
+) -> None:
+    """Rename pre-2.0 ``_scene_<key>`` ids to the (kind, id, key) scheme.
+
+    Only the first catalog entry that owned a given old id migrates onto its new
+    id (that is the one that was actually visible); any others were previously
+    shadowed and simply appear fresh under their new ids.
+    """
+    try:
+        from homeassistant.helpers import entity_registry as er
+
+        registry = er.async_get(hass)
+    except Exception:  # noqa: BLE001 - best-effort; skip under test stubs/old HA
+        return
+    claimed: set[str] = set()
+    for scenario in scenarios:
+        key = str(scenario.get("key", "scenario")).lower()
+        old_uid = f"{entry.entry_id}_scene_{key}"
+        if old_uid in claimed:
+            continue
+        claimed.add(old_uid)
+        new_uid = _scene_unique_id(entry, scenario)
+        if new_uid == old_uid:
+            continue
+        old_entity = registry.async_get_entity_id("scene", DOMAIN, old_uid)
+        if old_entity and registry.async_get_entity_id("scene", DOMAIN, new_uid) is None:
+            registry.async_update_entity(old_entity, new_unique_id=new_uid)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -107,6 +162,9 @@ async def async_setup_entry(
 ) -> None:
     coordinator: HymerConnectCoordinator = hass.data[DOMAIN][entry.entry_id]
     await coordinator.wait_for_first_frame(timeout=30.0)
+    _migrate_scene_unique_ids(
+        hass, entry, resolved_scenarios(coordinator.active_slots)
+    )
     tracked_unique_ids: set[str] = set()
 
     def _new_entities(scenarios: list[dict[str, Any]]) -> list[HymerScenarioScene]:

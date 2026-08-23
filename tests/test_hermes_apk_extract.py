@@ -87,6 +87,15 @@ class HermesApkExtractTests(unittest.TestCase):
         self.assertGreaterEqual(len(vehicles["models"]), 10)
         self.assertGreaterEqual(len(scenarios["entries"]), 1)
 
+        # Field-value parity, not just counts: vehicle groups must resolve to the
+        # real enum NAMES (a mix of them), never a stale all-identical 0 -- the
+        # regression that stale producer registers previously caused.
+        groups = [m.get("group") for m in vehicles["models"].values()]
+        named = [g for g in groups if isinstance(g, str) and g]
+        self.assertGreater(len(named), len(groups) // 2, "most groups should be named")
+        self.assertGreaterEqual(len(set(named)), 3, "expected several distinct groups")
+        self.assertIn("CamperVan", named)
+
     def test_oauth_client_is_well_formed(self) -> None:
         import extract_oauth_from_apk as ex
 

@@ -22,7 +22,12 @@ from .apk_oauth import (
     OAuthExtractionError,
     _read_bundle,
     _StringTable,
+    read_bundle_asset,
 )
+
+
+class HermesLimitError(OAuthExtractionError):
+    """Raised when a bundle would exceed a reconstruction resource budget."""
 
 BUNDLE_ASSET = "assets/index.android.bundle"
 
@@ -246,12 +251,47 @@ for _line in _OPS_DEF.strip().splitlines():
     _OPCODES.append((_parts[0], _ops, 1 + sum(_OPSZ[t] for t in _ops)))
 _NAME2OP = {n: i for i, (n, _o, _s) in enumerate(_OPCODES)}
 
+# Opcodes whose first operand is a *source* (or an object being mutated), NOT a
+# freshly written destination register. Every other Reg8-first opcode writes its
+# result into operand 0; when we don't model that result we invalidate operand 0
+# so a stale value can't leak into a reconstructed object.
+_OP0_NOT_DEST = frozenset({
+    "StoreToEnvironment", "StoreToEnvironmentL",
+    "StoreNPToEnvironment", "StoreNPToEnvironmentL",
+    "PutById", "PutByIdLong", "TryPutById", "TryPutByIdLong",
+    "PutNewOwnByIdShort", "PutNewOwnById", "PutNewOwnByIdLong",
+    "PutNewOwnNEById", "PutNewOwnNEByIdLong",
+    "PutOwnByIndex", "PutOwnByIndexL", "PutOwnByVal", "PutByVal",
+    "PutOwnGetterSetterByVal",
+    "Ret", "Throw", "SwitchImm", "IteratorClose",
+    "Store8", "Store16", "Store32",
+})
+_OP0_DEST = [
+    bool(ops) and ops[0] == "Reg8" and name not in _OP0_NOT_DEST
+    for name, ops, _sz in _OPCODES
+]
+
 # SerializedLiteralParser tags (bits 6-4): 0 Null 1 True 2 False 3 Number(8)
 # 4 LongString(4) 5 ShortString(2) 6 ByteString(1) 7 Integer(4).
 _STR_W = {4: 4, 5: 2, 6: 1}
 _UNKNOWN = object()
 
-MIN_VERSION, MAX_VERSION = 90, 96
+# The opcode table above is the v96 layout; interpreting a different version's
+# bytecode with it would silently mis-decode. HYMER ships v96, so require it
+# exactly for reconstruction (the header-only OAuth byte-scan still spans 90-96).
+RECONSTRUCT_VERSION = 96
+
+# Resource budgets. The bundle is untrusted; a crafted one must not be able to
+# exhaust memory. The real HYMER bundle produces ~80k objects and a handful of
+# short arrays, so these ceilings sit far above legitimate output.
+_MAX_ARRAY_INDEX = 1 << 20        # reject PutOwnByIndex targets beyond this
+_MAX_ARRAY_LEN = 1 << 20          # cap any single reconstructed list
+_MAX_OBJECTS = 4_000_000          # cap total object/array literals created
+_MAX_FILL_ELEMENTS = 16_000_000   # cap total list slots filled across the run
+_MAX_INSTRUCTIONS = 200_000_000   # decoded-instruction backstop
+_MAX_CLEAN_DEPTH = 200            # nesting depth _clean will descend (well < the
+#                                   Python recursion limit, so no C-stack risk)
+_MAX_CLEAN_NODES = 8_000_000      # container nodes _clean will visit
 
 
 def _align4(x: int) -> int:
@@ -297,9 +337,11 @@ class _Reader:
     def __init__(self, raw: bytes) -> None:
         self.raw = raw
         self.b = _read_bundle(raw)
-        version = struct.unpack_from("<I", raw, 8)[0]
-        if not MIN_VERSION <= version <= MAX_VERSION:
-            raise OAuthExtractionError(f"unsupported Hermes bytecode version {version}")
+        if self.b.version != RECONSTRUCT_VERSION:
+            raise OAuthExtractionError(
+                "Hermes reconstruction requires bytecode version "
+                f"{RECONSTRUCT_VERSION}, got {self.b.version}"
+            )
         # A lightly-cached string table (ids are resolved repeatedly).
         base_st = _StringTable(self.b)
         cache: dict[int, str] = {}
@@ -312,19 +354,11 @@ class _Reader:
                 return v
 
         self.st = _CachedST()
+        self.func_count = self.b.function_count
         self.keybuf = raw[self.b.objkey_off: self.b.objkey_off + self.b.objkey_size]
         self.valbuf = raw[self.b.objval_off: self.b.objval_off + self.b.objval_size]
-        (_fl, _g, self.func_count, skc, idc, sc, osc, sss, _bic, _bis,
-         _rc, _rs, array_buffer_size, _oks, _ovs, *_r) = struct.unpack_from("<19I", raw, 32)
-        off = _align4(128)
-        off = _align4(off) + self.func_count * 16
-        off = _align4(off) + skc * 4
-        off = _align4(off) + idc * 4
-        off = _align4(off) + sc * 4
-        off = _align4(off) + osc * 8
-        off = _align4(off) + sss
-        off = _align4(off)
-        self.arraybuf = raw[off: off + array_buffer_size]
+        # Section offsets come pre-validated (against fileLength) from _read_bundle.
+        self.arraybuf = raw[self.b.arraybuf_off: self.b.arraybuf_off + self.b.arraybuf_size]
 
     def _functions(self):
         raw = self.raw
@@ -352,13 +386,25 @@ class _Reader:
         put_own = {OP["PutNewOwnByIdShort"], OP["PutNewOwnById"], OP["PutNewOwnByIdLong"],
                    OP["PutNewOwnNEById"], OP["PutNewOwnNEByIdLong"]}
         put_idx = {OP["PutOwnByIndex"], OP["PutOwnByIndexL"]}
+        get_id = {OP["GetByIdShort"], OP["GetById"], OP["GetByIdLong"],
+                  OP["TryGetById"], OP["TryGetByIdLong"]}
         op_newobj, op_newarr = OP["NewObject"], OP["NewArray"]
         op_mov, op_movl = OP["Mov"], OP["MovLong"]
         lc_str = {OP["LoadConstString"], OP["LoadConstStringLongIndex"]}
         lc_int = {OP["LoadConstUInt8"], OP["LoadConstInt"], OP["LoadConstDouble"]}
         lc_true, lc_false, lc_zero = OP["LoadConstTrue"], OP["LoadConstFalse"], OP["LoadConstZero"]
         lc_null = {OP["LoadConstNull"], OP["LoadConstUndefined"], OP["LoadConstEmpty"]}
+        # Opcodes handled above already assign regs correctly. For every OTHER
+        # opcode that writes a value into its first (register) operand, we cannot
+        # model the result, so we must invalidate that register -- otherwise a
+        # later Put copies a STALE value into an object (this is what turned
+        # every vehicle's `group` into a leftover 0). `_OP0_NOT_DEST` marks the
+        # opcodes whose first operand is a source/object register (or not a
+        # value), which must NOT be invalidated.
+        op0_dest = _OP0_DEST
 
+        instr = 0
+        fills = 0
         for foff, fsize in self._functions():
             regs: dict[int, Any] = {}
             p, end = foff, foff + fsize
@@ -366,6 +412,9 @@ class _Reader:
                 op = raw[p]
                 if op >= len(_OPCODES):
                     break
+                instr += 1
+                if instr > _MAX_INSTRUCTIONS:
+                    raise HermesLimitError("bundle exceeds the instruction budget")
                 _name, operands, isize = _OPCODES[op]
                 a = p + 1
                 if op == op_nowb or op == op_nowbl:
@@ -375,9 +424,12 @@ class _Reader:
                     else:
                         _sh, numLit = struct.unpack_from("<HH", raw, a + 1)
                         keyIdx, valIdx = struct.unpack_from("<II", raw, a + 5)
+                    numLit = min(numLit, _MAX_ARRAY_LEN)
                     d = dict(zip(_parse_literals(self.keybuf, keyIdx, numLit, st),
                                  _parse_literals(self.valbuf, valIdx, numLit, st)))
                     regs[dst] = d
+                    if len(objects) >= _MAX_OBJECTS:
+                        raise HermesLimitError("bundle exceeds the object budget")
                     objects.append(d)
                 elif op == op_nawb or op == op_nawbl:
                     dst = raw[a]
@@ -386,9 +438,17 @@ class _Reader:
                     else:
                         _sh, numElems = struct.unpack_from("<HH", raw, a + 1)
                         bufIdx = struct.unpack_from("<I", raw, a + 5)[0]
-                    regs[dst] = _parse_literals(self.arraybuf, bufIdx, numElems, st)
+                    numElems = min(numElems, _MAX_ARRAY_LEN)
+                    arr = _parse_literals(self.arraybuf, bufIdx, numElems, st)
+                    regs[dst] = arr
+                    if len(objects) >= _MAX_OBJECTS:
+                        raise HermesLimitError("bundle exceeds the object budget")
+                    objects.append(arr)
                 elif op == op_newobj:
-                    d = {}; regs[raw[a]] = d; objects.append(d)
+                    d = {}; regs[raw[a]] = d
+                    if len(objects) >= _MAX_OBJECTS:
+                        raise HermesLimitError("bundle exceeds the object budget")
+                    objects.append(d)
                 elif op == op_newarr:
                     regs[raw[a]] = []
                 elif op == op_mov:
@@ -415,6 +475,23 @@ class _Reader:
                     regs[raw[a]] = 0
                 elif op in lc_null:
                     regs[raw[a]] = None
+                elif op in get_id:
+                    # Property read. We can resolve it only when the source
+                    # register already holds a reconstructed object (e.g. an
+                    # enum literal); otherwise the value is unknown, so the
+                    # destination must be invalidated rather than left stale.
+                    dst, src_reg = raw[a], raw[a + 1]
+                    w = operands[3]
+                    if w == "UInt8":
+                        sid = raw[a + 3]
+                    elif w == "UInt16":
+                        sid = struct.unpack_from("<H", raw, a + 3)[0]
+                    else:
+                        sid = struct.unpack_from("<I", raw, a + 3)[0]
+                    src = regs.get(src_reg)
+                    name = st.get(sid)
+                    regs[dst] = (src[name] if isinstance(src, dict) and name in src
+                                 else _UNKNOWN)
                 elif op in put_id:
                     obj, val, _cache = raw[a], raw[a + 1], raw[a + 2]
                     sid = (struct.unpack_from("<H", raw, a + 3)[0] if operands[3] == "UInt16"
@@ -431,10 +508,19 @@ class _Reader:
                     idx = (raw[a + 2] if operands[2] == "UInt8"
                            else struct.unpack_from("<I", raw, a + 2)[0])
                     tgt = regs.get(obj)
-                    if isinstance(tgt, list):
-                        while len(tgt) <= idx:
-                            tgt.append(None)
+                    # Reject an attacker-controlled index that would balloon the
+                    # list, and bound the total slots filled across the run.
+                    if isinstance(tgt, list) and idx <= _MAX_ARRAY_INDEX:
+                        if idx >= len(tgt):
+                            grow = idx + 1 - len(tgt)
+                            fills += grow
+                            if fills > _MAX_FILL_ELEMENTS or idx + 1 > _MAX_ARRAY_LEN:
+                                raise HermesLimitError("bundle exceeds the array budget")
+                            tgt.extend([None] * grow)
                         tgt[idx] = regs.get(val, _UNKNOWN)
+                elif op0_dest[op]:
+                    # Unmodelled value-producing opcode: drop the stale result.
+                    regs[raw[a]] = _UNKNOWN
                 p += isize
         return objects
 
@@ -446,37 +532,56 @@ class _Reader:
                 tgt[key] = val
 
 
-def _clean(obj, _path=frozenset()):
-    """Strip untracked markers and break register-reuse cycles."""
-    if isinstance(obj, (dict, list)):
-        if id(obj) in _path:
-            return None
-        _path = _path | {id(obj)}
-    if isinstance(obj, dict):
-        return {k: _clean(v, _path) for k, v in obj.items() if v is not _UNKNOWN}
-    if isinstance(obj, list):
-        return [_clean(v, _path) for v in obj]
-    return obj
+def _clean(root):
+    """Strip untracked markers and break register-reuse cycles.
+
+    Depth- and node-bounded, using a mutable on-path set (so there are no
+    per-node frozenset copies) and WITHOUT changing the process-wide recursion
+    limit. A crafted deep or cyclic graph therefore cannot crash the C stack or
+    blow up memory: it is truncated at the depth/node budget instead.
+    """
+    on_path: set[int] = set()
+    nodes = 0
+
+    def rec(obj, depth):
+        nonlocal nodes
+        if isinstance(obj, (dict, list)):
+            if depth > _MAX_CLEAN_DEPTH:
+                return None
+            oid = id(obj)
+            if oid in on_path:
+                return None
+            nodes += 1
+            if nodes > _MAX_CLEAN_NODES:
+                raise HermesLimitError("reconstructed graph exceeds the node budget")
+            on_path.add(oid)
+            try:
+                if isinstance(obj, dict):
+                    return {
+                        k: rec(v, depth + 1)
+                        for k, v in obj.items()
+                        if v is not _UNKNOWN
+                    }
+                return [rec(v, depth + 1) for v in obj]
+            finally:
+                on_path.discard(oid)
+        return obj
+
+    return rec(root, 0)
 
 
 def reconstruct_object_literals(apk_bytes: bytes) -> list[dict]:
     """Return every object literal reconstructed from the APK's Hermes bundle."""
-    import io
-    import sys
+    return reconstruct_object_literals_from_bundle(read_bundle_asset(apk_bytes))
 
-    with zipfile.ZipFile(io.BytesIO(apk_bytes)) as z:
-        try:
-            raw = z.read(BUNDLE_ASSET)
-        except KeyError as err:
-            raise OAuthExtractionError(f"{BUNDLE_ASSET} not found in APK") from err
-    reader = _Reader(raw)
-    # Reconstructed literals can nest deeply; raise the limit for _clean's walk.
-    old_limit = sys.getrecursionlimit()
-    sys.setrecursionlimit(max(old_limit, 50000))
+
+def reconstruct_object_literals_from_bundle(bundle_bytes: bytes) -> list[dict]:
+    """Reconstruct object literals from an already-extracted Hermes bundle."""
+    reader = _Reader(bundle_bytes)
     try:
         return [_clean(o) for o in reader.reconstruct()]
-    finally:
-        sys.setrecursionlimit(old_limit)
+    except RecursionError as err:  # defensive: the depth cap should prevent this
+        raise HermesLimitError("reconstructed graph too deep") from err
 
 
 def reconstruct_object_literals_from_path(apk_path: str) -> list[dict]:

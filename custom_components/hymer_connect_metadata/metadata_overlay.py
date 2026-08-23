@@ -578,6 +578,22 @@ def _collect_registry_defs_from_bundle(
     return component_defs, vehicles, vehicle_group_variant
 
 
+def _looks_like_group_enum(value: dict[str, Any]) -> bool:
+    """True for the vehicle-group enum literal (``{name: index}``).
+
+    The reconstructed bundle also holds other ``str -> int`` enums (POI
+    categories, etc.); the vehicle-group one is the one carrying a ``default``
+    entry alongside the known group names.
+    """
+    if not value or not all(
+        isinstance(k, str) and isinstance(v, int) for k, v in value.items()
+    ):
+        return False
+    return "default" in value and bool(
+        {"Integrated", "CamperVan", "SemiIntegrated"} & set(value)
+    )
+
+
 def _collect_registry_defs_from_objects(
     objects: list[dict[str, Any]],
 ) -> tuple[dict[int, dict[str, Any]], list[dict[str, Any]], dict[Any, Any]]:
@@ -598,11 +614,17 @@ def _collect_registry_defs_from_objects(
         if isinstance(value.get("key"), str) and value.get("modelName") is not None:
             vehicle = dict(value)
             # ``group`` indexes VehicleGroupVariant and must be a hashable scalar;
-            # a rare vehicle reconstructs it as a container -> fall back to 0.
+            # a rare vehicle reconstructs it as a container -> drop it (unknown)
+            # rather than fabricate a 0 that would read as "Integrated".
             if not isinstance(vehicle.get("group"), (int, str, type(None))):
-                vehicle["group"] = 0
+                vehicle["group"] = None
             seen_vehicles[value["key"]] = vehicle
+        # The group enum can appear either nested under a ``VehicleGroupVariant``
+        # key or -- in the APK reconstruction -- as a bare ``{name: index}``
+        # object. Recognise the bare form so group indices resolve to names.
         group_variant = value.get("VehicleGroupVariant")
+        if not isinstance(group_variant, dict) and _looks_like_group_enum(value):
+            group_variant = value
         if isinstance(group_variant, dict) and len(group_variant) >= len(
             vehicle_group_variant
         ):
@@ -705,14 +727,46 @@ def _component_display_names_from_i18n_subset(
     return names
 
 
+def _component_display_names_from_objects(
+    objects: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Recover light-circuit/group/module labels from reconstructed objects.
+
+    The app ships one label map per locale; the base (first-emitted) one is the
+    English source, so we pick the earliest map with the widest key coverage and
+    reuse the same subset mapping as the offline i18n path.
+    """
+
+    def best(predicate) -> dict[str, Any]:
+        chosen: dict[str, Any] = {}
+        best_count = 0
+        for value in objects:
+            if not isinstance(value, dict):
+                continue
+            count = sum(
+                1 for k in value if isinstance(k, str) and predicate(k)
+            )
+            if count > best_count:  # strict '>' keeps the earliest max-coverage map
+                chosen, best_count = value, count
+        return chosen
+
+    subset = {
+        "CONTROLS.LIGHTING.BULBS": best(
+            lambda k: k.startswith("LIGHT_CIRCUIT_") or k == "HEGOTEC_LIGHT_MODULE"
+        ),
+        "CONTROLS.LIGHTING.GROUPS": best(lambda k: k.startswith("LIGHT_GROUP_")),
+    }
+    return _component_display_names_from_i18n_subset(subset)
+
+
 def _extract_component_display_names_from_bundle(
     bundle_path: Path,
     objects: list[dict[str, Any]] | None = None,
 ) -> dict[str, str]:
-    # Custom light-circuit/group labels are decompiled-text patterns; when
-    # reconstructing from an APK we skip them and fall back to generated names.
+    # Custom light-circuit/group labels: recover them from the reconstructed
+    # objects on the APK path, or from the decompiled bundle text offline.
     if objects is not None:
-        return {}
+        return _component_display_names_from_objects(objects)
     if not bundle_path.exists():
         return {}
 

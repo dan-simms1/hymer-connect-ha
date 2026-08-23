@@ -182,7 +182,12 @@ def scenario_availability(observed_slots: set[tuple[int, int]]) -> list[dict[str
                 "action_count": len(actions),
                 "present_action_count": len(present_actions),
                 "supported_action_count": len(supported_actions),
-                "executable_for_vehicle": bool(actions) and len(supported_actions) == len(actions),
+                # "executable" now means the vehicle can run at least one of the
+                # scenario's actions -- which is exactly when resolved_scenarios()
+                # exposes it. "fully_executable" keeps the stricter all-actions
+                # sense for diagnostics.
+                "executable_for_vehicle": bool(supported_actions),
+                "fully_executable_for_vehicle": bool(actions) and len(supported_actions) == len(actions),
                 "complete_for_vehicle": bool(actions) and len(present_actions) == len(actions),
                 "present_actions": present_actions,
                 "supported_actions": supported_actions,

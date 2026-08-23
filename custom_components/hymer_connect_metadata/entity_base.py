@@ -491,9 +491,14 @@ class HymerSensor(_HymerSlotEntity, SensorEntity):
         # BMS "time remaining" reports 0x7FFF / 0xFFFF (in minutes) as "not
         # applicable" — e.g. when the battery is full or not discharging.
         # Show it as unavailable rather than a nonsensical ~22-day figure.
+        # Gate tightly: only the battery-time slot, and only an EXACT integral
+        # sentinel (so a genuine 32767.x-minute reading is never suppressed).
         if (
             self._meta.unit == "min"
+            and "time_remaining" in self._meta.label
             and isinstance(v, (int, float))
+            and not isinstance(v, bool)
+            and float(v).is_integer()
             and int(v) in (32767, 65535)
         ):
             return None

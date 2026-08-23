@@ -28,6 +28,12 @@ from dataclasses import dataclass
 BUNDLE_ASSET = "assets/index.android.bundle"
 HERMES_MAGIC = bytes.fromhex("c61fbc03")
 
+# The APK and its Hermes bundle are untrusted input parsed inside Home
+# Assistant, so every read is bounded. The real HYMER bundle is a few MB; these
+# caps sit far above that but well below anything that could exhaust the host.
+_MAX_BUNDLE_BYTES = 64 * 1024 * 1024
+_MAX_ZIP_RATIO = 200  # reject a member that inflates more than this (zip bomb)
+
 
 class OAuthExtractionError(RuntimeError):
     """Raised when the OAuth client cannot be recovered from the bundle."""
@@ -36,10 +42,14 @@ class OAuthExtractionError(RuntimeError):
 @dataclass
 class _Bundle:
     raw: bytes
+    version: int
+    function_count: int
     string_count: int
     smallstr_off: int
     overflow_off: int
     storage_off: int
+    arraybuf_off: int
+    arraybuf_size: int
     objkey_off: int
     objkey_size: int
     objval_off: int
@@ -51,7 +61,7 @@ def _align4(x: int) -> int:
 
 
 def _read_bundle(raw: bytes) -> _Bundle:
-    if raw[:4] != HERMES_MAGIC:
+    if len(raw) < 128 or raw[:4] != HERMES_MAGIC:
         raise OAuthExtractionError("not a Hermes bytecode bundle (bad magic)")
     version = struct.unpack_from("<I", raw, 8)[0]
     if version < 90 or version > 96:
@@ -67,22 +77,63 @@ def _read_bundle(raw: bytes) -> _Bundle:
     if file_length != len(raw):
         raise OAuthExtractionError("Hermes header fileLength mismatch")
 
+    # Every section offset below is derived from header-supplied counts. A
+    # hostile header can make them run past the file; validate each computed end
+    # against the (already length-checked) file so no later read is unbounded.
+    n = len(raw)
+
+    def _bound(end: int, what: str) -> int:
+        if end < 0 or end > n:
+            raise OAuthExtractionError(f"Hermes {what} section exceeds file length")
+        return end
+
     off = _align4(128)
-    off = _align4(off); off += function_count * 16       # function headers
-    off = _align4(off); off += string_kind_count * 4     # string kinds
-    off = _align4(off); off += identifier_count * 4      # identifier hashes
-    off = _align4(off); smallstr_off = off; off += string_count * 4
-    off = _align4(off); overflow_off = off; off += overflow_string_count * 8
-    off = _align4(off); storage_off = off; off += string_storage_size
-    off = _align4(off); off += array_buffer_size         # array buffer
-    off = _align4(off); objkey_off = off; off += obj_key_size
-    off = _align4(off); objval_off = off; off += obj_value_size
+    off = _align4(off); _bound(off + function_count * 16, "function"); off += function_count * 16
+    off = _align4(off); _bound(off + string_kind_count * 4, "string-kind"); off += string_kind_count * 4
+    off = _align4(off); _bound(off + identifier_count * 4, "identifier"); off += identifier_count * 4
+    off = _align4(off); smallstr_off = off; _bound(off + string_count * 4, "small-string"); off += string_count * 4
+    off = _align4(off); overflow_off = off; _bound(off + overflow_string_count * 8, "overflow-string"); off += overflow_string_count * 8
+    off = _align4(off); storage_off = off; _bound(off + string_storage_size, "string-storage"); off += string_storage_size
+    off = _align4(off); arraybuf_off = off; _bound(off + array_buffer_size, "array-buffer"); off += array_buffer_size
+    off = _align4(off); objkey_off = off; _bound(off + obj_key_size, "object-key"); off += obj_key_size
+    off = _align4(off); objval_off = off; _bound(off + obj_value_size, "object-value"); off += obj_value_size
     return _Bundle(
-        raw=raw, string_count=string_count,
+        raw=raw, version=version, function_count=function_count, string_count=string_count,
         smallstr_off=smallstr_off, overflow_off=overflow_off, storage_off=storage_off,
+        arraybuf_off=arraybuf_off, arraybuf_size=array_buffer_size,
         objkey_off=objkey_off, objkey_size=obj_key_size,
         objval_off=objval_off, objval_size=obj_value_size,
     )
+
+
+def read_bundle_asset(apk_bytes: bytes) -> bytes:
+    """Return ``assets/index.android.bundle`` from an APK, bounded against zip bombs.
+
+    The uncompressed size is capped both by the ZIP directory's declared size
+    *and* by a hard read limit, so a member whose header lies about its size
+    cannot inflate past the cap.
+    """
+    try:
+        with zipfile.ZipFile(io.BytesIO(apk_bytes)) as archive:
+            try:
+                info = archive.getinfo(BUNDLE_ASSET)
+            except KeyError as err:
+                raise OAuthExtractionError(
+                    f"{BUNDLE_ASSET} not found in APK"
+                ) from err
+            if info.file_size > _MAX_BUNDLE_BYTES:
+                raise OAuthExtractionError("Hermes bundle exceeds the size limit")
+            if info.compress_size and (
+                info.file_size / info.compress_size > _MAX_ZIP_RATIO
+            ):
+                raise OAuthExtractionError("Hermes bundle compression ratio too high")
+            with archive.open(info) as member:
+                data = member.read(_MAX_BUNDLE_BYTES + 1)
+    except zipfile.BadZipFile as err:
+        raise OAuthExtractionError("not a valid APK (bad zip)") from err
+    if len(data) > _MAX_BUNDLE_BYTES:
+        raise OAuthExtractionError("Hermes bundle exceeds the size limit")
+    return data
 
 
 class _StringTable:
@@ -124,17 +175,75 @@ def _b64_decode(text: str) -> str | None:
         return None
 
 
+def _client_payload(username: str, password: str) -> dict[str, str]:
+    basic = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
+    return {
+        "_comment": (
+            "Locally generated OAuth client auth derived from the user's own "
+            "HYMER app artefact. Sensitive local file. Do not share or publish."
+        ),
+        "authorization_header": f"Basic {basic}",
+    }
+
+
+def _extract_from_config_object(
+    objects: list[dict[str, object]],
+) -> tuple[str, str] | None:
+    """Bind CLIENT_USERNAME/PASSWORD from a single reconstructed config object.
+
+    This is the structurally-sound path: the username and password come from the
+    *same* object literal (built by one ``NewObjectWithBuffer``), so there is no
+    chance of pairing values that merely happen to sit next to each other in the
+    value buffer. Requires exactly one such object.
+    """
+    matches: list[tuple[str, str]] = []
+    for obj in objects:
+        if not isinstance(obj, dict):
+            continue
+        user_b64 = obj.get("CLIENT_USERNAME")
+        pass_b64 = obj.get("CLIENT_PASSWORD")
+        if not isinstance(user_b64, str) or not isinstance(pass_b64, str):
+            continue
+        user = _b64_decode(user_b64)
+        pw = _b64_decode(pass_b64)
+        if user and pw and not user.startswith("https://"):
+            matches.append((user, pw))
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise OAuthExtractionError("multiple config objects define OAuth credentials")
+    return None
+
+
 def extract_oauth_client(apk_bytes: bytes) -> dict[str, str]:
     """Return the ``oauth_client.json`` payload for a HYMER APK's bytes.
 
     Raises OAuthExtractionError if the config object cannot be located/validated.
     """
-    with zipfile.ZipFile(io.BytesIO(apk_bytes)) as z:
-        try:
-            raw = z.read(BUNDLE_ASSET)
-        except KeyError as err:
-            raise OAuthExtractionError(f"{BUNDLE_ASSET} not found in APK") from err
+    raw = read_bundle_asset(apk_bytes)
 
+    # Preferred path: reconstruct the object literals and read both credentials
+    # from the one config object that contains them (values bound to the same
+    # instruction). Fall back to the anchored byte-scan for non-v96 bundles or
+    # if reconstruction yields no config object.
+    try:
+        from .apk_hermes import reconstruct_object_literals_from_bundle
+
+        bound = _extract_from_config_object(
+            reconstruct_object_literals_from_bundle(raw)
+        )
+    except OAuthExtractionError:
+        raise
+    except Exception:  # noqa: BLE001 - reconstruction is best-effort; scan is the fallback
+        bound = None
+    if bound is not None:
+        return _client_payload(*bound)
+
+    return _extract_oauth_by_scan(raw)
+
+
+def _extract_oauth_by_scan(raw: bytes) -> dict[str, str]:
+    """Anchored byte-scan fallback over the object key/value buffers."""
     b = _read_bundle(raw)
     st = _StringTable(b)
     cu_id = _find_string_id(st, b.string_count, "CLIENT_USERNAME")
@@ -197,15 +306,7 @@ def extract_oauth_client(apk_bytes: bytes) -> dict[str, str]:
         raise OAuthExtractionError(
             "could not bind CLIENT_USERNAME/PASSWORD to their values"
         )
-    username, password = bound
-    basic = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
-    return {
-        "_comment": (
-            "Locally generated OAuth client auth derived from the user's own "
-            "HYMER app artefact. Sensitive local file. Do not share or publish."
-        ),
-        "authorization_header": f"Basic {basic}",
-    }
+    return _client_payload(*bound)
 
 
 def extract_oauth_client_from_path(apk_path: str) -> dict[str, str]:

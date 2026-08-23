@@ -6,6 +6,19 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
+- `2.0.0b3` (beta) — security and robustness hardening of the in-HA APK
+  provisioning, from a full external review. The APK is untrusted input parsed
+  inside Home Assistant, so every read and reconstruction is now bounded and
+  fail-closed: uncompressed-bundle and compression-ratio caps (zip-bomb
+  defence), header-offset validation, array/object/instruction budgets, an
+  iterative depth/node-bounded graph clean (no more process-wide recursion-limit
+  change), HTTPS-only downloads with catalog-invariant validation, and a
+  transactional locked pack swap with rollback. Also fixes stale-register leakage
+  (vehicle **group** now resolves to its real name, not `0`), binds the OAuth
+  client from the same config object, recovers light display names on the APK
+  path, disambiguates scenario/scene id collisions with a migration, and reloads
+  every entry after an options-dialog rebuild. Reconstruction is pinned to
+  Hermes v96. Backward-compatible; no change for a normal APK.
 - `2.0.0b2` (beta) — **the integration can build its own runtime metadata from a
   HYMER APK, inside Home Assistant, with no external toolchain.** A pure-Python
   Hermes-bytecode reader reconstructs the catalog object literals (including
