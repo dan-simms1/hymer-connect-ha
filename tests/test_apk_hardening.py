@@ -191,10 +191,10 @@ class CleanWalkTests(unittest.TestCase):
             apk_hermes._MAX_CLEAN_NODES = original
 
 
-class ZipEntryCountTests(unittest.TestCase):
-    def test_entry_count_matches_a_normal_archive(self) -> None:
+class ZipBoundsTests(unittest.TestCase):
+    def test_normal_archive_passes(self) -> None:
         apk = _apk_with_bundle(_hermes_header(96))
-        self.assertEqual(apk_oauth._zip_entry_count(io.BytesIO(apk)), 1)
+        apk_oauth._check_zip_bounds(io.BytesIO(apk))  # must not raise
 
     def test_too_many_entries_is_rejected(self) -> None:
         apk = _apk_with_bundle(_hermes_header(96))
@@ -205,6 +205,17 @@ class ZipEntryCountTests(unittest.TestCase):
                 apk_oauth.read_bundle_asset(apk)
         finally:
             apk_oauth._MAX_ZIP_ENTRIES = original
+
+    def test_under_declared_count_with_huge_directory_is_rejected(self) -> None:
+        # EOCD declares only 1 entry but a 10 MB central directory -- ZipFile
+        # would read records across the whole size, so the size bound must catch
+        # it even though the declared count is tiny.
+        eocd = b"PK\x05\x06" + struct.pack(
+            "<HHHHIIH", 0, 0, 1, 1, 10_000_000, 0, 0
+        )
+        blob = b"\x00" * 16 + eocd
+        with self.assertRaises(OAuthExtractionError):
+            apk_oauth._check_zip_bounds(io.BytesIO(blob))
 
 
 class StringRangeTests(unittest.TestCase):

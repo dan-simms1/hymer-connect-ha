@@ -19,8 +19,9 @@ trusted APK; existing installs are unaffected.
 
 - Bound the download and archive: stream the APK to a size-capped spooled file
   (never held twice in memory), require **HTTPS** on the initial URL *and every
-  redirect hop*, and reject a ZIP central-directory bomb (millions of entries)
-  before the archive is parsed.
+  redirect hop*, and reject a ZIP central-directory bomb — bounding both the
+  declared entry count *and* the declared directory size (which is what actually
+  drives how many records the parser reads) — before the archive is parsed.
 - Bound the untrusted Hermes bundle end to end: cap the *uncompressed* bundle
   size and compression ratio (zip-bomb defence — the download cap only covered
   the compressed APK), validate every header-derived section offset and every

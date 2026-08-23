@@ -34,6 +34,7 @@ HERMES_MAGIC = bytes.fromhex("c61fbc03")
 _MAX_BUNDLE_BYTES = 64 * 1024 * 1024
 _MAX_ZIP_RATIO = 200  # reject a member that inflates more than this (zip bomb)
 _MAX_ZIP_ENTRIES = 200_000  # a real APK has a few thousand; reject a dir bomb
+_MIN_CENTRAL_DIR_RECORD = 46  # fixed central-directory header size (bytes)
 
 
 class OAuthExtractionError(RuntimeError):
@@ -111,11 +112,14 @@ def _read_bundle(raw: bytes) -> _Bundle:
     )
 
 
-def _zip_entry_count(fh) -> int:
-    """Read the archive's declared total-entry count from its end-of-central-dir.
+def _check_zip_bounds(fh) -> None:
+    """Reject a central-directory bomb before ``ZipFile`` parses the archive.
 
-    Cheap pre-check so a central-directory bomb (millions of empty entries) is
-    rejected before ``ZipFile`` allocates a ZipInfo per entry.
+    ``ZipFile`` reads central-directory records across the declared directory
+    *size* (not the declared entry count), so both are bounded: each record is at
+    least ``_MIN_CENTRAL_DIR_RECORD`` bytes, so ``size_cd // 46`` is the true
+    upper bound on the ZipInfo objects it will allocate. A malicious archive that
+    under-declares its count is therefore still caught by the size bound.
     """
     fh.seek(0, io.SEEK_END)
     size = fh.tell()
@@ -126,20 +130,25 @@ def _zip_entry_count(fh) -> int:
     if idx < 0:
         raise OAuthExtractionError("not a valid APK (no zip end-of-directory record)")
     total = struct.unpack_from("<H", tail, idx + 10)[0]
-    if total != 0xFFFF:
-        return total
-    # ZIP64: the count lives in the ZIP64 EOCD record the locator points at.
-    loc = tail.rfind(b"PK\x06\x07", 0, idx)
-    if loc < 0:
-        return total
-    zip64_off = struct.unpack_from("<Q", tail, loc + 8)[0]
-    if zip64_off < 0 or zip64_off + 40 > size:
-        raise OAuthExtractionError("invalid ZIP64 end-of-directory record")
-    fh.seek(zip64_off)
-    z64 = fh.read(56)
-    if z64[:4] != b"PK\x06\x06":
-        raise OAuthExtractionError("invalid ZIP64 end-of-directory record")
-    return struct.unpack_from("<Q", z64, 32)[0]
+    size_cd = struct.unpack_from("<I", tail, idx + 12)[0]
+    if total == 0xFFFF or size_cd == 0xFFFFFFFF:
+        # ZIP64: the real count and directory size live in the ZIP64 EOCD record.
+        loc = tail.rfind(b"PK\x06\x07", 0, idx)
+        if loc >= 0:
+            zip64_off = struct.unpack_from("<Q", tail, loc + 8)[0]
+            if zip64_off < 0 or zip64_off + 56 > size:
+                raise OAuthExtractionError("invalid ZIP64 end-of-directory record")
+            fh.seek(zip64_off)
+            z64 = fh.read(56)
+            if z64[:4] != b"PK\x06\x06":
+                raise OAuthExtractionError("invalid ZIP64 end-of-directory record")
+            total = struct.unpack_from("<Q", z64, 32)[0]
+            size_cd = struct.unpack_from("<Q", z64, 40)[0]
+    if (
+        total > _MAX_ZIP_ENTRIES
+        or size_cd // _MIN_CENTRAL_DIR_RECORD > _MAX_ZIP_ENTRIES
+    ):
+        raise OAuthExtractionError("APK central directory is too large")
 
 
 def read_bundle_asset(source) -> bytes:
@@ -153,9 +162,7 @@ def read_bundle_asset(source) -> bytes:
     """
     fh = io.BytesIO(source) if isinstance(source, (bytes, bytearray)) else source
     try:
-        entries = _zip_entry_count(fh)
-        if entries > _MAX_ZIP_ENTRIES:
-            raise OAuthExtractionError("APK has too many zip entries")
+        _check_zip_bounds(fh)
         fh.seek(0)
         with zipfile.ZipFile(fh) as archive:  # fh not closed (we did not open it)
             try:
