@@ -12,13 +12,13 @@ response and silently dropped -- see ``build_set_values_ble_pia_frame``.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
 import math
 import random
 import struct
 import time
-from typing import Any
 import zlib
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
 UART_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 

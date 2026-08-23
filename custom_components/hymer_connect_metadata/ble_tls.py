@@ -3,13 +3,14 @@
 The SCU speaks TLS 1.0/1.1 with RSA-AES-SHA ciphers over the Nordic UART GATT
 channel. This drives that handshake through an ``ssl.MemoryBIO`` pair so the
 records can be pumped over any transport. Ported from the standalone token tool,
-proven against a real vehicle on 2026-08-22. No Bluetooth or HA dependency.
+proven against a real vehicle on 2026-08-22. No Bluetooth/HA dependency and no
+loopback self-test helpers.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import ssl
+from dataclasses import dataclass
 from typing import Any
 
 APP_TLS_CIPHERS = "@SECLEVEL=0:AES128-SHA:AES256-SHA"
@@ -19,10 +20,6 @@ APP_TLS_MINIMUM_VERSION = ssl.TLSVersion.TLSv1
 APP_TLS_MAXIMUM_VERSION = ssl.TLSVersion.TLSv1_1
 
 _TLS_READ_CHUNK_SIZE = 16_384
-
-_TLS_SELF_TEST_PING = b"ping"
-
-_TLS_SELF_TEST_PONG = b"pong"
 
 class TlsSupportError(RuntimeError):
     """Raised when the local TLS stack cannot match the app's legacy profile."""
@@ -215,144 +212,3 @@ class LegacyTlsClient:
             if not chunk:
                 return b"".join(chunks)
             chunks.append(chunk)
-
-def _generate_self_signed_cert(tempdir: Path) -> tuple[Path, Path]:
-    openssl_binary = shutil.which("openssl")
-    if not openssl_binary:
-        raise TlsSupportError("openssl is required for tls-self-test but was not found")
-    cert_path = tempdir / "cert.pem"
-    key_path = tempdir / "key.pem"
-    command = [
-        openssl_binary,
-        "req",
-        "-x509",
-        "-newkey",
-        "rsa:2048",
-        "-sha256",
-        "-nodes",
-        "-keyout",
-        str(key_path),
-        "-out",
-        str(cert_path),
-        "-days",
-        "1",
-        "-subj",
-        "/CN=localhost",
-    ]
-    try:
-        subprocess.run(
-            command,
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except (FileNotFoundError, subprocess.CalledProcessError) as err:
-        raise TlsSupportError(f"Could not generate a local self-signed cert: {err}") from err
-    return cert_path, key_path
-
-def _create_legacy_server_context(
-    tls_version: ssl.TLSVersion,
-    cert_path: Path,
-    key_path: Path,
-) -> ssl.SSLContext:
-    try:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.minimum_version = tls_version
-        context.maximum_version = tls_version
-        context.set_ciphers(APP_TLS_CIPHERS)
-        context.load_cert_chain(str(cert_path), str(key_path))
-        return context
-    except ssl.SSLError as err:
-        raise TlsSupportError(
-            f"Could not create local TLS server context for {tls_version.name}: {err}"
-        ) from err
-
-def _run_one_loopback_self_test(
-    tls_version: ssl.TLSVersion,
-    cert_path: Path,
-    key_path: Path,
-) -> TlsLoopbackSelfTestResult:
-    server_context = _create_legacy_server_context(tls_version, cert_path, key_path)
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.bind(("127.0.0.1", 0))
-    listener.listen(1)
-    port = listener.getsockname()[1]
-    server_state: dict[str, Any] = {}
-
-    def run_server() -> None:
-        try:
-            connection, _ = listener.accept()
-            with connection:
-                with server_context.wrap_socket(connection, server_side=True) as tls_socket:
-                    server_state["negotiated_tls_version"] = tls_socket.version()
-                    cipher = tls_socket.cipher()
-                    server_state["cipher_suite"] = cipher[0]
-                    server_state["cipher_protocol"] = cipher[1]
-                    server_state["cipher_bits"] = cipher[2]
-                    server_state["received"] = tls_socket.recv(len(_TLS_SELF_TEST_PING))
-                    tls_socket.sendall(_TLS_SELF_TEST_PONG)
-        except Exception as err:  # pragma: no cover - depends on local TLS stack
-            server_state["error"] = repr(err)
-        finally:
-            listener.close()
-
-    thread = threading.Thread(target=run_server, daemon=True)
-    thread.start()
-
-    client = LegacyTlsClient(
-        minimum_version=tls_version,
-        maximum_version=tls_version,
-    )
-    reply = b""
-    with socket.create_connection(("127.0.0.1", port), timeout=5.0) as sock:
-        sock.settimeout(5.0)
-        exchange = client.begin_handshake()
-        _send_outbound_records(sock, exchange.outbound_tls_records)
-        while not exchange.handshake_complete:
-            incoming = sock.recv(65_536)
-            if not incoming:
-                raise TlsSupportError("Local TLS self-test server closed during handshake")
-            exchange = client.feed_encrypted(incoming)
-            _send_outbound_records(sock, exchange.outbound_tls_records)
-
-        exchange = client.encrypt_plaintext(_TLS_SELF_TEST_PING)
-        _send_outbound_records(sock, exchange.outbound_tls_records)
-        while not reply:
-            incoming = sock.recv(65_536)
-            if not incoming:
-                raise TlsSupportError("Local TLS self-test server closed before reply")
-            exchange = client.feed_encrypted(incoming)
-            _send_outbound_records(sock, exchange.outbound_tls_records)
-            if exchange.plaintext_chunks:
-                reply = b"".join(exchange.plaintext_chunks)
-
-    thread.join(timeout=5.0)
-    if thread.is_alive():
-        raise TlsSupportError("Local TLS self-test server did not exit cleanly")
-    if "error" in server_state:
-        raise TlsSupportError(
-            f"Local TLS self-test server failed for {tls_version.name}: {server_state['error']}"
-        )
-    if server_state.get("received") != _TLS_SELF_TEST_PING:
-        raise TlsSupportError(
-            f"Local TLS self-test server saw unexpected plaintext for {tls_version.name}: "
-            f"{server_state.get('received')!r}"
-        )
-    if reply != _TLS_SELF_TEST_PONG:
-        raise TlsSupportError(
-            f"Local TLS self-test client saw unexpected reply for {tls_version.name}: {reply!r}"
-        )
-
-    return TlsLoopbackSelfTestResult(
-        requested_tls_version=tls_version.name,
-        negotiated_tls_version=str(server_state["negotiated_tls_version"]),
-        cipher_suite=str(server_state["cipher_suite"]),
-        cipher_protocol=str(server_state["cipher_protocol"]),
-        cipher_bits=int(server_state["cipher_bits"]),
-        server_received_hex=server_state["received"].hex(),
-        client_received_hex=reply.hex(),
-    )
-
-def _send_outbound_records(sock: socket.socket, records: bytes) -> None:
-    if records:
-        sock.sendall(records)

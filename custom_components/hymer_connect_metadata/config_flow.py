@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
@@ -16,22 +16,32 @@ try:
 except ImportError:  # pragma: no cover - compatibility with older HA cores
     from homeassistant.config_entries import OptionsFlow as OptionsFlowWithReload
 
+try:
+    from homeassistant.data_entry_flow import AbortFlow
+except ImportError:  # pragma: no cover - real HA always provides it
+
+    class AbortFlow(Exception):
+        """Fallback so ``except AbortFlow`` resolves under test stubs.
+
+        Named to mirror Home Assistant's own ``data_entry_flow.AbortFlow``.
+        """
+
 from .api import HymerConnectApi, HymerConnectApiError, HymerConnectAuthError
 from .const import (
-    BRANDS,
-    CONF_ACCESS_TOKEN,
-    CONF_BRAND,
-    CONF_EHG_REFRESH_TOKEN,
-    CONF_REFRESH_TOKEN,
     BLE_MODE_FALLBACK,
     BLE_MODE_PRIMARY,
+    BRANDS,
+    CONF_ACCESS_TOKEN,
     CONF_BLE_ADDRESS,
     CONF_BLE_ENABLED,
     CONF_BLE_MODE,
+    CONF_BRAND,
+    CONF_EHG_REFRESH_TOKEN,
     CONF_QR_TOKEN,
+    CONF_REFRESH_TOKEN,
+    CONF_SCU_URN,
     CONF_SHOW_ADMIN_ACTIONS,
     CONF_SHOW_DEBUG_DIAGNOSTICS,
-    CONF_SCU_URN,
     CONF_USE_FAHRENHEIT,
     CONF_USE_MILES,
     CONF_VEHICLE_ID,
@@ -48,6 +58,19 @@ from .runtime_metadata import RuntimeMetadataMissingError
 _LOGGER = logging.getLogger(__name__)
 
 CONF_SELECTED_VEHICLE = "selected_vehicle"
+
+_BLE_ADDRESS_RE = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+
+
+def _normalize_ble_address(value: str | None) -> str | None:
+    """Return an upper-case BLE MAC, or None if it is not a valid address.
+
+    The value is fed into Bleak and the BlueZ object path, so it must be a real
+    ``AA:BB:CC:DD:EE:FF`` MAC and is normalised to upper case (BlueZ paths are
+    case-sensitive).
+    """
+    candidate = (value or "").strip().upper()
+    return candidate if _BLE_ADDRESS_RE.match(candidate) else None
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -128,6 +151,33 @@ class HymerConnectConfigFlow(ConfigFlow, domain=DOMAIN):
             vin=entry.data.get(CONF_VIN, ""),
             scu_urn=entry.data.get(CONF_SCU_URN, ""),
         )
+
+    async def _async_preflight_entry_identity(
+        self, entry: ConfigEntry, stable_unique_id: str
+    ) -> None:
+        """Run the identity mismatch/collision aborts WITHOUT mutating anything.
+
+        The QR/BLE reconfigure mints a remote-access token as a side effect of
+        pairing the SCU. A unique-id collision or mismatch that would otherwise
+        surface only during the post-pairing migration must therefore abort the
+        flow FIRST, before we pair. Mirrors the checks in
+        _async_prepare_entry_identity, minus the entry update.
+        """
+        if not stable_unique_id:
+            return
+
+        await self.async_set_unique_id(stable_unique_id)
+
+        legacy_account_unique_id = entry.data.get(CONF_USERNAME, "").lower()
+        if entry.unique_id == stable_unique_id:
+            self._abort_if_unique_id_mismatch()
+            return
+
+        if entry.unique_id not in (None, legacy_account_unique_id):
+            self._abort_if_unique_id_mismatch()
+            return
+
+        self._abort_if_unique_id_configured()
 
     async def _async_prepare_entry_identity(
         self, entry: ConfigEntry, stable_unique_id: str
@@ -347,17 +397,123 @@ class HymerConnectConfigFlow(ConfigFlow, domain=DOMAIN):
                 elif qr_token and ble_address:
                     # Mint the remote-access refresh token by pairing over BLE.
                     # The user must press the vehicle's CONNECTION button first.
-                    from .ble_transport import BleTransportError, async_pair_over_ble
+                    from .ble_transport import async_pair_over_ble
 
-                    try:
-                        result = await async_pair_over_ble(
-                            self.hass, api, ble_address, qr_token
-                        )
-                    except BleTransportError:
-                        _LOGGER.warning("BLE pairing failed", exc_info=True)
-                        errors["base"] = "ble_pairing_failed"
+                    normalized_address = _normalize_ble_address(ble_address)
+                    if normalized_address is None:
+                        errors["base"] = "invalid_ble_address"
                     else:
-                        ehg_refresh_token = result["ehg_refresh_token"]
+                        # Bind the owner QR token to THIS entry's vehicle, FAIL
+                        # CLOSED: a token for a different SCU must never mint a
+                        # token into this entry. get_vehicle_by_token returns the
+                        # raw EHG object, whose urn is under urn/vehicleUrn
+                        # (vehicle_urn is only the discovery-normalised key), so
+                        # read all of them, and treat any failure as a bad token.
+                        #
+                        # Anchor on the entry's STORED urn, never the resolver's
+                        # selection: resolve_vehicle_selection() falls back to the
+                        # sole discovered vehicle when the stored urn is gone from
+                        # the account, which could be a DIFFERENT SCU. Pairing
+                        # mints credentials as a side effect, so an empty stored
+                        # urn must fail closed rather than pair against a fallback.
+                        entry_urn = str(entry.data.get(CONF_VEHICLE_URN, "") or "")
+                        token_vehicle = None
+                        try:
+                            token_vehicle = await api.get_vehicle_by_token(qr_token)
+                        except HymerConnectAuthError:
+                            raise  # keep its meaning via the outer handler
+                        except HymerConnectApiError as err:
+                            # A 4xx means the cloud rejected the QR token itself; a
+                            # connection error or 5xx is transient (not a bad QR),
+                            # so tell those two apart for the user.
+                            status = getattr(err, "status", None)
+                            # 408/425/429 are "retry later", not a bad token.
+                            retryable = status in (408, 425, 429)
+                            if (
+                                status is not None
+                                and 400 <= status < 500
+                                and not retryable
+                            ):
+                                errors["base"] = "invalid_qr_token"
+                            else:
+                                _LOGGER.warning(
+                                    "QR token lookup failed (transient)", exc_info=True
+                                )
+                                errors["base"] = "cannot_connect"
+                        except Exception:
+                            # Unexpected failure (e.g. a malformed 200 body): we
+                            # cannot conclude the QR is bad, so do NOT claim it is
+                            # -- only the classified non-retryable 4xx above does.
+                            _LOGGER.warning("QR token lookup failed", exc_info=True)
+                            errors["base"] = "unknown"
+                        token_urn = ""
+                        if isinstance(token_vehicle, dict):
+                            token_urn = str(
+                                token_vehicle.get("vehicle_urn")
+                                or token_vehicle.get("urn")
+                                or token_vehicle.get("vehicleUrn")
+                                or ""
+                            )
+                        resolved_urn = str(vehicle.get("vehicle_urn", "") or "")
+                        if errors:
+                            pass  # lookup already produced a specific error
+                        elif not entry_urn or resolved_urn != entry_urn:
+                            # The entry's stored vehicle is not the one discovery
+                            # resolved: resolve_vehicle_selection()'s single-vehicle
+                            # fallback picked a DIFFERENT SCU (or nothing is stored).
+                            # Refuse before any pairing side effect AND before the
+                            # success path migrates identity/metadata onto that
+                            # other vehicle.
+                            errors["base"] = "vehicle_not_found"
+                        elif not token_urn or token_urn != entry_urn:
+                            # Stored vehicle confirmed, but the QR is for another.
+                            errors["base"] = "qr_token_wrong_vehicle"
+                        else:
+                            # Abort BEFORE pairing if migrating this entry's
+                            # identity to the vehicle would collide with/mismatch
+                            # another entry -- otherwise we would mint a token and
+                            # only then abort, wasting it and a pairing slot.
+                            await self._async_preflight_entry_identity(
+                                entry,
+                                self._vehicle_unique_id(
+                                    vehicle,
+                                    fallback_scope=entry.data.get(
+                                        CONF_USERNAME, ""
+                                    ).lower(),
+                                ),
+                            )
+                            try:
+                                result = await async_pair_over_ble(
+                                    self.hass, api, normalized_address, qr_token
+                                )
+                            except HymerConnectAuthError:
+                                # Cloud auth for the confirmation token failed --
+                                # the user must fix credentials, not the BLE link.
+                                raise
+                            except HymerConnectApiError:
+                                # Cloud could not issue the confirmation token;
+                                # this is not a Bluetooth problem, keep it distinct.
+                                _LOGGER.warning(
+                                    "Cloud confirmation-token step failed",
+                                    exc_info=True,
+                                )
+                                errors["base"] = "cannot_connect"
+                            except Exception:
+                                _LOGGER.warning("BLE pairing failed", exc_info=True)
+                                errors["base"] = "ble_pairing_failed"
+                            else:
+                                minted = (
+                                    result.get("ehg_refresh_token")
+                                    if isinstance(result, dict)
+                                    else ""
+                                )
+                                if minted:
+                                    ehg_refresh_token = minted
+                                else:
+                                    errors["base"] = "ble_pairing_failed"
+                elif qr_token or ble_address:
+                    # One of the pair-over-BLE fields given without the other.
+                    errors["base"] = "ble_both_fields_required"
                 elif ehg_refresh_token:
                     vehicle_urn = vehicle.get("vehicle_urn", "")
                     if not vehicle_urn:
@@ -366,6 +522,11 @@ class HymerConnectConfigFlow(ConfigFlow, domain=DOMAIN):
                         await api.get_remote_access_token(
                             vehicle_urn, ehg_refresh_token
                         )
+            except AbortFlow:
+                # A unique-id preflight decided to abort (e.g. already
+                # configured / mismatch). Let it terminate the flow -- do NOT
+                # swallow it into a form error.
+                raise
             except HymerConnectAuthError:
                 errors["base"] = "invalid_auth"
             except HymerConnectApiError:
@@ -393,6 +554,13 @@ class HymerConnectConfigFlow(ConfigFlow, domain=DOMAIN):
                         },
                     )
 
+        # Render the secret token fields masked. Imported lazily so the module
+        # loads in test/stub environments without the selector helper.
+        from homeassistant.helpers import selector
+
+        secret = selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+        )
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=vol.Schema(
@@ -400,8 +568,8 @@ class HymerConnectConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Optional(
                         CONF_EHG_REFRESH_TOKEN,
                         default=entry.data.get(CONF_EHG_REFRESH_TOKEN, ""),
-                    ): str,
-                    vol.Optional(CONF_QR_TOKEN, default=""): str,
+                    ): secret,
+                    vol.Optional(CONF_QR_TOKEN, default=""): secret,
                     vol.Optional(CONF_BLE_ADDRESS, default=""): str,
                 }
             ),
@@ -421,41 +589,57 @@ class HymerConnectOptionsFlow(OptionsFlowWithReload):
         user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
         """Manage the integration options."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            address = str(user_input.get(CONF_BLE_ADDRESS, "") or "").strip()
+            if user_input.get(CONF_BLE_ENABLED) and not address:
+                errors[CONF_BLE_ADDRESS] = "ble_address_required"
+            elif address:
+                normalized = _normalize_ble_address(address)
+                if normalized is None:
+                    errors[CONF_BLE_ADDRESS] = "invalid_ble_address"
+                else:
+                    user_input[CONF_BLE_ADDRESS] = normalized
+            if not errors:
+                return self.async_create_entry(title="", data=user_input)
+            # Re-show with the user's values so they can fix the address.
+            source = user_input
+        else:
+            source = self._config_entry.options
 
         options = {
-            CONF_SHOW_ADMIN_ACTIONS: self._config_entry.options.get(
+            CONF_SHOW_ADMIN_ACTIONS: source.get(
                 CONF_SHOW_ADMIN_ACTIONS,
                 False,
             ),
-            CONF_SHOW_DEBUG_DIAGNOSTICS: self._config_entry.options.get(
+            CONF_SHOW_DEBUG_DIAGNOSTICS: source.get(
                 CONF_SHOW_DEBUG_DIAGNOSTICS,
                 False,
             ),
-            CONF_USE_MILES: self._config_entry.options.get(
+            CONF_USE_MILES: source.get(
                 CONF_USE_MILES,
                 False,
             ),
-            CONF_USE_FAHRENHEIT: self._config_entry.options.get(
+            CONF_USE_FAHRENHEIT: source.get(
                 CONF_USE_FAHRENHEIT,
                 False,
             ),
-            CONF_BLE_ENABLED: self._config_entry.options.get(
+            CONF_BLE_ENABLED: source.get(
                 CONF_BLE_ENABLED,
                 False,
             ),
-            CONF_BLE_ADDRESS: self._config_entry.options.get(
+            CONF_BLE_ADDRESS: source.get(
                 CONF_BLE_ADDRESS,
                 "",
             ),
-            CONF_BLE_MODE: self._config_entry.options.get(
+            CONF_BLE_MODE: source.get(
                 CONF_BLE_MODE,
                 BLE_MODE_FALLBACK,
             ),
         }
         return self.async_show_form(
             step_id="init",
+            errors=errors,
             data_schema=vol.Schema(
                 {
                     vol.Optional(

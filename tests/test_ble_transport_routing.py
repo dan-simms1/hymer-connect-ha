@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import importlib
-from types import SimpleNamespace
 import unittest
+from types import SimpleNamespace
 
 from tests.hymer_test_support import ensure_package_paths, install_homeassistant_stubs
 

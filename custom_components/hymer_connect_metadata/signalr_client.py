@@ -351,7 +351,8 @@ class HymerSignalRClient:
                 if resp.status >= 400:
                     text = await resp.text()
                     raise HymerConnectApiError(
-                        f"SignalR negotiate (step 2) failed: {resp.status} {text[:200]}"
+                        f"SignalR negotiate (step 2) failed: {resp.status} {text[:200]}",
+                        status=resp.status,
                     )
                 negotiate2 = await resp.json()
         except aiohttp.ClientError as err:

@@ -9,16 +9,34 @@ can't silently diverge.
 
 from __future__ import annotations
 
-from pathlib import Path
+import importlib.util
 import sys
 import unittest
+from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
+# Import the tool encoder as a package (it has its own namespace).
 sys.path.insert(0, str(_ROOT / "tools" / "hymer_token_tool"))
-sys.path.insert(0, str(_ROOT / "custom_components" / "hymer_connect_metadata"))
+from hymer_token_tool import ble as tool_ble
 
-from hymer_token_tool import ble as tool_ble  # noqa: E402
-import ble_pia as integ_ble  # noqa: E402
+
+def _load_by_path(name: str, path: Path):
+    """Load a module from a file without polluting sys.path.
+
+    The integration dir contains a `select.py`; inserting it on sys.path would
+    shadow the stdlib `select` module under `unittest discover`.
+    """
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+integ_ble = _load_by_path(
+    "_hymer_ble_pia_under_test",
+    _ROOT / "custom_components" / "hymer_connect_metadata" / "ble_pia.py",
+)
 
 
 class BlePiaParityTests(unittest.TestCase):

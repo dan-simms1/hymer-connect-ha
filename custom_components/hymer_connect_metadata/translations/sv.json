@@ -31,9 +31,15 @@
       },
       "reconfigure": {
         "title": "Uppdatera Remote Access Token",
-        "description": "Uppdatera den app-extraherade EHG Remote Access Refresh Token f\u00f6r detta fordon. L\u00e4mna f\u00e4ltet tomt f\u00f6r att ta bort lagrad token.",
+        "description": "Set the EHG remote-access refresh token for this vehicle. Either paste one you already have, or mint one over Bluetooth: enter the vehicle's QR activation-code text and the SCU's Bluetooth address, press the CONNECTION button on the vehicle, then submit. Leave all fields blank to remove the stored token.",
         "data": {
-          "ehg_refresh_token": "EHG Remote Access Refresh Token"
+          "ehg_refresh_token": "EHG Remote Access Refresh Token",
+          "qr_token": "QR activation token (to pair over Bluetooth)",
+          "ble_address": "SCU Bluetooth address (to pair over Bluetooth)"
+        },
+        "data_description": {
+          "qr_token": "The text encoded in the vehicle's QR code. Only needed to mint a token over BLE.",
+          "ble_address": "The SCU's Bluetooth MAC, e.g. AA:BB:CC:DD:EE:FF. Only needed to mint a token over BLE."
         }
       }
     },
@@ -45,7 +51,13 @@
       "no_vehicles": "Inga fordon hittades f\u00f6r detta konto",
       "vehicle_not_found": "Det konfigurerade fordonet kunde inte hittas i detta konto",
       "wrong_account": "De nya inloggningsuppgifterna har inte \u00e5tkomst till det konfigurerade fordonet",
-      "unknown": "Ov\u00e4ntat fel intr\u00e4ffade"
+      "unknown": "Ov\u00e4ntat fel intr\u00e4ffade",
+      "ble_pairing_failed": "Bluetooth pairing with the vehicle failed. Make sure you pressed the CONNECTION button and the SCU is in range, then try again.",
+      "qr_token_wrong_vehicle": "That QR activation token is for a different vehicle than this entry.",
+      "invalid_qr_token": "The QR activation token was not accepted.",
+      "ble_both_fields_required": "To pair over Bluetooth, provide BOTH the QR activation token and the SCU Bluetooth address.",
+      "invalid_ble_address": "That is not a valid Bluetooth address. Use the form AA:BB:CC:DD:EE:FF.",
+      "ble_address_required": "A SCU Bluetooth address is required when Bluetooth control is enabled."
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
@@ -54,6 +66,10 @@
     }
   },
   "options": {
+    "error": {
+      "ble_address_required": "A SCU Bluetooth address is required when Bluetooth control is enabled.",
+      "invalid_ble_address": "That is not a valid Bluetooth address. Use the form AA:BB:CC:DD:EE:FF."
+    },
     "step": {
       "init": {
         "title": "Visnings- och fels\u00f6kningsalternativ",
@@ -62,7 +78,14 @@
           "show_admin_actions": "Visa administrat\u00f6rs\u00e5tg\u00e4rder",
           "show_debug_diagnostics": "Visa fels\u00f6kningsdiagnostik",
           "use_miles": "Visa avst\u00e5nd i miles",
-          "use_fahrenheit": "Visa temperaturer i Fahrenheit"
+          "use_fahrenheit": "Visa temperaturer i Fahrenheit",
+          "ble_enabled": "Enable Bluetooth (BLE) control",
+          "ble_address": "SCU Bluetooth address",
+          "ble_mode": "Bluetooth mode (fallback = cloud first; primary = BLE first)"
+        },
+        "data_description": {
+          "ble_address": "The SCU's Bluetooth MAC, e.g. AA:BB:CC:DD:EE:FF.",
+          "ble_mode": "fallback: try the cloud first and BLE only when the cloud fails (home HA near the van). primary: try BLE first, cloud as backup (a van-local HA)."
         }
       }
     }

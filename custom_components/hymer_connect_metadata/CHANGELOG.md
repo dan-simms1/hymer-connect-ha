@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-23
+
+Hardening pass over the 1.1.0 BLE transport (a full review-and-fix loop), plus a
+CI fix. BLE is still off by default; cloud-only behaviour is unchanged.
+
+### Fixed
+
+- **Hassfest CI.** `manifest.json` keys are now ordered `domain`, `name`, then
+  alphabetical, as hassfest requires — `after_dependencies` had been placed out
+  of order in 1.1.0, which failed the Hassfest workflow on `main`.
+- **QR/BLE pairing binds fail-closed to the entry's own vehicle.** The owner QR
+  token is validated against the entry's *stored* vehicle URN (never the
+  discovery resolver's selection, whose single-vehicle fallback could be a
+  different SCU), and a duplicate-entry identity collision is now detected
+  *before* pairing — so a remote-access token is never minted and then
+  discarded, and never bound to the wrong vehicle.
+- **BLE session robustness.** Every write→response cycle (including pairing)
+  holds a session-wide lock; a partial connection is torn down on any start
+  failure or cancellation; a timeout/TLS/disconnect invalidates the session
+  instead of being retained for a repeated 30s timeout; a routine SignalR
+  teardown no longer stops a healthy BLE session; shutdown is monotonic.
+- **Pairing correctness.** The confirmation is sent only after a request-id-
+  correlated, success-status response; an error status is never treated as a
+  minted token. Legacy PIN/passkey BlueZ agent callbacks are implemented so
+  bonding does not fail when the SCU selects them. MTU acquisition probes the
+  bleak backend so large frames ride a larger MTU.
+- **Error taxonomy.** Cloud vs BLE vs bad-QR failures during pairing map to
+  distinct, accurate messages; transient cloud failures (5xx, timeouts,
+  408/425/429) are reported as retryable rather than as an invalid token.
+- **Malformed frames.** The PIA frame length is capped at 64 KiB to prevent
+  unbounded buffer growth on a bad header.
+
+### Added
+
+- Unit-test CI workflow (`.github/workflows/tests.yml`) running the full suite,
+  and adversarial tests covering the above (concurrency, lifecycle, shutdown,
+  vehicle binding, identity-collision, error classification).
+- `options.error` translations for the Bluetooth options-flow field validation,
+  in all nine shipped locales.
+
+### Changed
+
+- `HymerConnectApiError` now carries the HTTP status (when known) so callers can
+  tell a client rejection from a transient upstream failure.
+- Documentation (root README, token-tool README, BLE runbook) reconciled to the
+  verified 2026-08-22 result: BLE pairing and token minting are proven end to
+  end on a real vehicle (still a hands-on path needing a Linux/BlueZ host).
+
 ## [1.1.0] - 2026-08-22
 
 ### Added

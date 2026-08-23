@@ -148,13 +148,15 @@ connection fault but is a key mismatch.
   command line. It kills the session. Kill by PID.
 - `timeout` does not exist on macOS or on LibreELEC.
 
-## Next steps
+## Status and next steps
 
-1. Find why `PairMobileRequest` gets no answer. Capture the raw frames either
-   side of the TLS layer and compare against the April PIA capture.
-2. Check whether the SCU caps bonded devices and is refusing a new one - the
-   phone holds a slot.
-3. If pairing completes, retry `setValues` and expect `status=1`.
-4. Portable bond: BlueZ keys live under `/var/lib/bluetooth/<adapter>/<peer>/`
+Pairing is solved. On 2026-08-22 `PairMobileRequest` completed against a real
+SCU, a remote-access refresh token was minted, and a `setValues` control write
+then returned `status=1`. The unblock was write-with-response (large frames
+overflowed the SCU RX buffer under write-without-response), not the MTU.
+
+Remaining, still unverified:
+
+1. Portable bond: BlueZ keys live under `/var/lib/bluetooth/<adapter>/<peer>/`
    and can move between Linux hosts if the destination adapter's address is set
    with `btmgmt public-addr`. Not yet verified.

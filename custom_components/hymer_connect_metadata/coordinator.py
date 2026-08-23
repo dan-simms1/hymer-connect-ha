@@ -7,34 +7,34 @@ The coordinator polls REST periodically and merges SignalR push data on arrival.
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+import contextlib
 import logging
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from datetime import timedelta
+from typing import Any
 
 import aiohttp
-
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import HymerConnectApi, HymerConnectApiError, HymerConnectAuthError
 from .capability_resolver import main_switch_slots
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
-
 from .const import (
     BLE_MODE_FALLBACK,
     BLE_MODE_PRIMARY,
     CONF_BLE_ADDRESS,
     CONF_BLE_ENABLED,
     CONF_BLE_MODE,
+    CONF_SCU_URN,
     CONF_VEHICLE_ID,
     CONF_VEHICLE_MODEL,
     CONF_VEHICLE_MODEL_GROUP,
     CONF_VEHICLE_MODEL_YEAR,
     CONF_VEHICLE_NAME,
-    CONF_SCU_URN,
     CONF_VEHICLE_URN,
     CONF_VIN,
     DEFAULT_SCAN_INTERVAL,
@@ -166,6 +166,7 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Local BLE transport (created lazily when enabled in options).
         self._ble: Any = None
         self._ble_start_lock: asyncio.Lock | None = None
+        self._ble_start_task: asyncio.Task | None = None
         super().__init__(
             hass,
             _LOGGER,
@@ -422,6 +423,8 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.mark_shutting_down()
         await self.async_cancel_background_tasks()
         await self.stop_signalr()
+        # Both transports come down on unload; BLE lives independently otherwise.
+        await self._stop_ble()
 
     async def wait_for_first_frame(self, timeout: float = 30.0) -> bool:
         """Wait for at least one slot to appear (capability discovery).
@@ -483,8 +486,12 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.config_entry.title,
                 exc_info=True,
             )
+        # Shutdown is terminal (only mark_shutting_down, on unload, sets it):
+        # if it began while we were re-authenticating, do NOT resurrect the
+        # coordinator by starting SignalR. Never clear the flag here.
+        if self._shutting_down:
+            return
         # Re-enable connection-lost handling and reset backoff for a clean start.
-        self._shutting_down = False
         self._suppress_connection_lost_refresh = False
         self._last_reconnect_attempt = 0.0
         self._reconnect_backoff = _INITIAL_BACKOFF
@@ -656,7 +663,11 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for attempt in range(2):
             try:
                 client = await self.async_ensure_signalr_healthy()
-            except HomeAssistantError:
+            except Exception:
+                _LOGGER.debug(
+                    "Cloud transport unavailable for %s",
+                    self.config_entry.title, exc_info=True,
+                )
                 return False
             method = getattr(client, method_name)
             try:
@@ -698,17 +709,30 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _ensure_ble(self) -> Any:
         """Return a connected BLE transport, connecting under a lock if needed."""
+        # Shutdown wins before the fast path: never hand out a transport once
+        # unload has begun.
+        if getattr(self, "_shutting_down", False):
+            return None
         if self._ble is not None and getattr(self._ble, "connected", False):
             return self._ble
         if self._ble_start_lock is None:
             self._ble_start_lock = asyncio.Lock()
         async with self._ble_start_lock:
+            if getattr(self, "_shutting_down", False):
+                return None
             if self._ble is not None and getattr(self._ble, "connected", False):
                 return self._ble
             await self._stop_ble()
+            # Re-check after the awaited cleanup above: shutdown may have begun
+            # while a queued caller held here, before we register the start task.
+            if getattr(self, "_shutting_down", False):
+                return None
             address = self.config_entry.options.get(CONF_BLE_ADDRESS)
             if not address:
                 return None
+            transport = None
+            # Register the in-flight start so shutdown can cancel and await it.
+            self._ble_start_task = asyncio.current_task()
             try:
                 from .ble_transport import HymerBleTransport
 
@@ -719,13 +743,35 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "BLE transport could not start for %s: %s",
                     self.config_entry.title, err,
                 )
+                if transport is not None:
+                    with contextlib.suppress(Exception):
+                        await transport.stop()
                 self._ble = None
+                self._ble_start_task = None
+                return None
+            if getattr(self, "_shutting_down", False):
+                # Unload started while we were connecting; never publish a live
+                # transport after shutdown -- stop the one we just built.
+                try:
+                    await transport.stop()
+                finally:
+                    self._ble = None
+                    self._ble_start_task = None
                 return None
             self._ble = transport
+            self._ble_start_task = None
             _LOGGER.info("BLE transport connected for %s", self.config_entry.title)
             return transport
 
     async def _stop_ble(self) -> None:
+        # Cancel and await any in-flight startup so unload quiesces BLE work
+        # (the start can otherwise run through connect/bond/TLS after unload).
+        task = getattr(self, "_ble_start_task", None)
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+        self._ble_start_task = None
         transport = getattr(self, "_ble", None)
         self._ble = None
         if transport is not None:
@@ -998,7 +1044,10 @@ class HymerConnectCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._capability_reload_slots.clear()
         self._cancel_reconnect_task()
         self._suppress_connection_lost_refresh = True
-        await self._stop_ble()
+        # NB: do NOT stop BLE here. _stop_signalr_locked runs on every SignalR
+        # reconnect/reauth; tearing down a healthy BLE session on a cloud blip
+        # would kill primary-mode control mid-command. BLE is stopped only on
+        # integration unload (async_prepare_for_shutdown).
         if self._signalr:
             try:
                 await self._signalr.stop()

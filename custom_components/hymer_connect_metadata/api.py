@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -18,8 +19,8 @@ from .const import (
     AUTH_GRANT_TYPE_REFRESH,
     ENDPOINT_ACCOUNTS_ME,
     ENDPOINT_AUTH,
-    ENDPOINT_CONFIRMATION_TOKEN,
     ENDPOINT_CONFIG_BRANDS,
+    ENDPOINT_CONFIRMATION_TOKEN,
     ENDPOINT_RV_TWIN_VEHICLES,
     ENDPOINT_SERVICE_CATALOGUE,
     HEADER_ACCESS_TOKEN,
@@ -37,7 +38,16 @@ TokenUpdateCallback = Callable[[str, str], None]
 
 
 class HymerConnectApiError(Exception):
-    """Base exception for API errors."""
+    """Base exception for API errors.
+
+    Carries the HTTP status when one is known (``None`` for connection errors),
+    so callers can tell a 4xx client rejection from a transient 5xx/connection
+    failure. Subclasses that do not pass one keep ``status = None``.
+    """
+
+    def __init__(self, message: str = "", *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class HymerConnectAuthError(HymerConnectApiError):
@@ -178,18 +188,24 @@ class HymerConnectApi:
                             headers=headers,
                             _retried=True,
                         )
-                    raise HymerConnectAuthError("Authentication failed")
+                    raise HymerConnectAuthError(
+                        "Authentication failed", status=resp.status
+                    )
                 if resp.status == 403:
-                    raise HymerConnectAuthError("Access forbidden")
+                    raise HymerConnectAuthError(
+                        "Access forbidden", status=resp.status
+                    )
                 if resp.status >= 400:
                     text = await resp.text()
                     raise HymerConnectApiError(
-                        f"API error {resp.status}: {text[:200]}"
+                        f"API error {resp.status}: {text[:200]}",
+                        status=resp.status,
                     )
                 if resp.content_type and "json" in resp.content_type:
                     return await resp.json()
                 return {}
-        except aiohttp.ClientError as err:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            # Timeout/connection failure: no HTTP status (stays None => transient).
             raise HymerConnectApiError(f"Connection error: {err}") from err
         except RuntimeError as err:
             if self._is_closed_client_error(err):
@@ -219,12 +235,15 @@ class HymerConnectApi:
             ) as resp:
                 _LOGGER.debug("Auth response status: %s", resp.status)
                 if resp.status == 401:
-                    raise HymerConnectAuthError("Invalid email or password")
+                    raise HymerConnectAuthError(
+                        "Invalid email or password", status=resp.status
+                    )
                 if resp.status >= 400:
                     text = await resp.text()
                     _LOGGER.error("Auth error %s: %s", resp.status, text[:200])
                     raise HymerConnectApiError(
-                        f"Auth error {resp.status}: {text[:200]}"
+                        f"Auth error {resp.status}: {text[:200]}",
+                        status=resp.status,
                     )
                 result = await resp.json()
                 if "access_token" in result:
@@ -236,7 +255,8 @@ class HymerConnectApi:
                         "refresh_token": self._refresh_token or "",
                     }
                 raise HymerConnectAuthError("No access_token in auth response")
-        except aiohttp.ClientError as err:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            # Timeout/connection failure: no HTTP status (stays None => transient).
             raise HymerConnectApiError(f"Connection error: {err}") from err
         except RuntimeError as err:
             if self._is_closed_client_error(err):
@@ -269,9 +289,12 @@ class HymerConnectApi:
                         "Token refresh failed %s: %s", resp.status, text[:200]
                     )
                     if resp.status in (400, 401, 403):
-                        raise HymerConnectAuthError("Token refresh failed")
+                        raise HymerConnectAuthError(
+                            "Token refresh failed", status=resp.status
+                        )
                     raise HymerConnectApiError(
-                        f"Token refresh temporarily failed: {resp.status}"
+                        f"Token refresh temporarily failed: {resp.status}",
+                        status=resp.status,
                     )
                 result = await resp.json()
                 if "access_token" in result:
@@ -281,7 +304,8 @@ class HymerConnectApi:
                     )
                     self._notify_tokens_updated()
                     return
-        except aiohttp.ClientError as err:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            # Timeout/connection failure: no HTTP status (stays None => transient).
             raise HymerConnectApiError(f"Connection error: {err}") from err
         except RuntimeError as err:
             if self._is_closed_client_error(err):

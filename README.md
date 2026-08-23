@@ -285,10 +285,30 @@ If you skip the remote-access refresh token:
 
 You can add or replace that token later through **Reconfigure**.
 
+## Bluetooth (BLE) — control and pairing
+
+The integration includes an optional local BLE transport. It is **off by
+default**; a cloud-only install without a Bluetooth adapter is unaffected.
+
+- **Control over Bluetooth.** Enable it in **Options** (`ble_enabled`, the SCU's
+  `ble_address`, and a `ble_mode`: `fallback` tries the cloud first and BLE when
+  the cloud fails — a home HA near the van; `primary` tries BLE first with cloud
+  as backup — a van-local HA). Only value writes (lights, switches, fridge,
+  heater) use BLE; other calls stay on the cloud.
+- **Mint the token over Bluetooth.** In **Reconfigure**, enter the vehicle's QR
+  activation-code text and the SCU's Bluetooth address, press the CONNECTION
+  button on the vehicle, and submit — the integration bonds, does the TLS
+  handshake and the pairing exchange, and stores the minted refresh token. No
+  proxy capture and no external tool.
+
+BLE bonding needs a **local** BlueZ adapter (HAOS or a Linux host); it cannot
+work over a remote Bluetooth proxy. See
+`tools/hymer_token_tool/BLE_RUNBOOK.md` for the field notes.
+
 ## Current Supported Token Workflow
 
-The currently supported real-world method is still the manual proxy-based
-capture flow using a patched Android APK and `mitmproxy`.
+The manual proxy-based capture flow (patched Android APK + `mitmproxy`) remains
+available and is the fallback when Bluetooth is not an option.
 
 For the currently maintained step-by-step instructions, follow Jan's upstream
 guide:
@@ -315,11 +335,11 @@ The intention of that tool is to provide an **alternative laptop-based way** to
 obtain the remote-access key/token from a **Windows, macOS, or Linux** machine
 instead of relying on the patched-APK + proxy workflow above.
 
-It is shipped as **early alpha** research code and should **not** be used yet
-for real vehicle pairing or production token minting.
-
-At the moment, it should be read as exploratory work toward a future desktop
-token-extraction path, not as a supported user workflow.
+It is shipped as **early alpha** research code: the BLE pairing and
+token-minting path has been verified end to end against a real vehicle (see
+below), but it is still a research instrument, not a polished one-click
+workflow. It requires a Linux/BlueZ host near the vehicle and several manual
+steps, so treat it as an advanced, hands-on path rather than a turnkey one.
 
 The token tool now reads the same locally generated `oauth_client.json` file as
 the integration, so you should run the metadata-preparation step at least once
@@ -475,6 +495,9 @@ The options flow currently supports:
 - debug diagnostics visibility
 - miles vs kilometres
 - Fahrenheit vs Celsius
+- Bluetooth (BLE) control: `ble_enabled`, the SCU `ble_address`, and `ble_mode`
+  (`fallback` = cloud first, BLE on cloud failure; `primary` = BLE first). Off
+  by default. See the Bluetooth section above.
 
 Admin actions are hidden by default. That includes the Smart Unit restart
 button.

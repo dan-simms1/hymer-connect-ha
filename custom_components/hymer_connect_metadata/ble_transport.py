@@ -25,12 +25,14 @@ adapter; it cannot work over a remote Bluetooth proxy.
 from __future__ import annotations
 
 import asyncio
-from collections import deque
+import contextlib
 import logging
-from typing import Any, Callable
+from collections import deque
+from collections.abc import Callable
+from typing import Any
 
 from . import ble_pia
-from .ble_tls import LegacyTlsClient, TlsSupportError
+from .ble_tls import LegacyTlsClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +47,7 @@ CONNECT_TIMEOUT = 20.0
 TLS_TIMEOUT = 30.0
 REQUEST_TIMEOUT = 30.0
 UART_WRITE_PACING_S = 0.005
+MAX_PIA_FRAME = 64 * 1024  # a sane ceiling; a larger declared length is malformed
 
 
 class BleTransportError(RuntimeError):
@@ -119,6 +122,10 @@ class HymerBleTransport:
         self._pending_frames: deque[bytes] = deque()
         self._frame_buffer = bytearray()
         self._notify_started = False
+        # Serialise the whole write-through-response cycle: HA can fire
+        # several entity commands at once, and one TLS/GATT stream cannot
+        # interleave them or the readers steal each other's responses.
+        self._request_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------ status
 
@@ -135,13 +142,29 @@ class HymerBleTransport:
     # ------------------------------------------------------------------ lifecycle
 
     async def start(self) -> None:
-        """Connect, bond if needed, wake, and complete the TLS handshake."""
-        await self._connect()
-        await self._ensure_bonded()
-        await self._acquire_mtu()
-        await self._start_notify()
-        await self._wake()
-        await self._establish_tls()
+        """Connect, bond if needed, wake, and complete the TLS handshake.
+
+        Exception-safe: any failure tears the half-open session down before
+        re-raising, so a partial connection is never leaked.
+        """
+        try:
+            await self._connect()
+            await self._ensure_bonded()
+            # Device1.Pair() can drop the GATT link; reconnect if it did, the
+            # same way the standalone tool recovers.
+            if not getattr(self._client, "is_connected", False):
+                await self._connect()
+            await self._acquire_mtu()
+            await self._start_notify()
+            await self._wake()
+            await self._establish_tls()
+        except BaseException:
+            # BaseException so CancelledError (during bond/notify/TLS) also cleans
+            # up the GATT client instead of leaking it. shield() lets the cleanup
+            # finish before the cancellation propagates.
+            with contextlib.suppress(Exception):  # cleanup is best effort
+                await asyncio.shield(self.stop())
+            raise
         _LOGGER.info("BLE transport ready for %s", self._address)
 
     async def stop(self) -> None:
@@ -180,14 +203,15 @@ class HymerBleTransport:
 
     async def _send_values(self, values: list[bytes]) -> bool:
         if not self.connected:
-            _LOGGER.warning("BLE transport not connected — cannot send")
-            return False
+            # Not a "rejected command" -- the session is dead. Raise so the
+            # caller tears it down instead of retaining it for a 30s re-timeout.
+            raise BleTransportError("BLE transport not connected")
         frame, request_id = ble_pia.build_set_values_ble_pia_frame(values)
-        try:
+        async with self._request_lock:
             response = await self._send_frame_await_response(frame, request_id)
-        except (BleTransportError, TlsSupportError) as err:
-            _LOGGER.warning("BLE setValues failed: %s", err)
-            return False
+        # Transport-fatal errors (timeout/TLS/disconnect) propagate from the
+        # await above; only a genuine negative SCU status returns False with the
+        # session left intact.
         if not response.succeeded:
             _LOGGER.warning(
                 "SCU rejected BLE setValues: status=%s (request_id=%s)",
@@ -214,14 +238,21 @@ class HymerBleTransport:
         """
         if self._tls is None or not self._tls.handshake_complete:
             raise BleTransportError("TLS not established — call start() first")
+        request_id = ble_pia.app_like_request_id()
         frame = ble_pia.build_pair_mobile_ble_pia_frame(
             activation_token, confirmation_token, mobile_device_name,
+            request_id=request_id,
         )
-        response_frame = await self._send_frame_await_any(frame, timeout=REQUEST_TIMEOUT)
-        response = ble_pia.decode_pair_mobile_response_frame(response_frame)
-        if send_confirmation:
-            confirm = ble_pia.build_pair_mobile_confirmation_ble_pia_frame(success=True)
-            await self._write_plaintext(confirm)
+        async with self._request_lock:
+            response = await self._send_pair_and_await(frame, request_id)
+            if response.status not in (None, 0, ble_pia.PIA_STATUS_SUCCESS):
+                raise BleTransportError(
+                    f"SCU rejected pairing: status={response.status}"
+                )
+            # Only confirm a successful pairing.
+            if send_confirmation:
+                confirm = ble_pia.build_pair_mobile_confirmation_ble_pia_frame(success=True)
+                await self._write_plaintext(confirm)
         return response
 
     # ------------------------------------------------------------------ connect
@@ -256,9 +287,12 @@ class HymerBleTransport:
                     self._address, err,
                 )
 
+        # Publish the client BEFORE awaiting connect(): if connect() partially
+        # succeeds and is then cancelled or raises, start()'s cleanup (stop())
+        # can only disconnect a client it can see.
         client = BleakClient(self._address, timeout=CONNECT_TIMEOUT)
-        await client.connect()
         self._client = client
+        await client.connect()
         _LOGGER.debug("BLE connected to %s via raw BleakClient", self._address)
 
     async def _ensure_bonded(self) -> None:
@@ -276,7 +310,6 @@ class HymerBleTransport:
             _LOGGER.debug("dbus_fast unavailable — assuming SCU is already bonded")
             return
 
-        dev_path = f"/org/bluez/{self._adapter}/dev_{self._address.replace(':', '_')}"
         agent_path = "/org/bluez/agent_hymer_metadata"
 
         try:
@@ -286,6 +319,14 @@ class HymerBleTransport:
             return
 
         try:
+            dev_path = await self._resolve_device_path(bus)
+            if dev_path is None:
+                _LOGGER.debug(
+                    "SCU %s not found on any local BlueZ adapter — assuming it is "
+                    "already bonded (e.g. reached over a Bluetooth proxy)",
+                    self._address,
+                )
+                return
             intro = await bus.introspect("org.bluez", dev_path)
             dprops = bus.get_proxy_object("org.bluez", dev_path, intro).get_interface(
                 "org.freedesktop.DBus.Properties"
@@ -307,23 +348,45 @@ class HymerBleTransport:
                         raise DBusError("org.bluez.Error.Rejected", "not our device")
 
                 @method()
-                def Release(self):  # noqa: N802
+                def Release(self):
                     pass
 
                 @method()
-                def RequestConfirmation(self, device: "o", passkey: "u"):  # noqa: F821,N802
+                def RequestConfirmation(self, device: o, passkey: u):  # noqa: F821
                     self._ok(device)
 
                 @method()
-                def RequestAuthorization(self, device: "o"):  # noqa: F821,N802
+                def RequestAuthorization(self, device: o):  # noqa: F821
+                    self._ok(device)
+
+                # Legacy PIN/passkey callbacks: some BlueZ/SCU exchanges select
+                # these instead of RequestConfirmation. Omitting them makes
+                # Device1.Pair() fail with an unknown-method error, so mirror the
+                # proven standalone agent (dbus_pair.py) -- still device-locked.
+                @method()
+                def RequestPinCode(self, device: o) -> s:  # noqa: F821
+                    self._ok(device)
+                    return "0000"
+
+                @method()
+                def RequestPasskey(self, device: o) -> u:  # noqa: F821
+                    self._ok(device)
+                    return 0
+
+                @method()
+                def DisplayPinCode(self, device: o, pincode: s):  # noqa: F821
                     self._ok(device)
 
                 @method()
-                def AuthorizeService(self, device: "o", uuid: "s"):  # noqa: F821,N802
+                def DisplayPasskey(self, device: o, passkey: u, entered: q):  # noqa: F821
                     self._ok(device)
 
                 @method()
-                def Cancel(self):  # noqa: N802
+                def AuthorizeService(self, device: o, uuid: s):  # noqa: F821
+                    self._ok(device)
+
+                @method()
+                def Cancel(self):
                     pass
 
             agent = _Agent(dev_path)
@@ -340,20 +403,48 @@ class HymerBleTransport:
             try:
                 await asyncio.wait_for(dev.call_pair(), timeout=REQUEST_TIMEOUT)
             finally:
-                try:
+                with contextlib.suppress(Exception):
                     await mgr.call_unregister_agent(agent_path)
-                except Exception:  # noqa: BLE001
-                    pass
-            try:
+            with contextlib.suppress(Exception):
                 await dprops.call_set("org.bluez.Device1", "Trusted", Variant("b", True))
-            except Exception:  # noqa: BLE001
-                pass
             _LOGGER.info("Bonded with SCU %s", self._address)
         finally:
             bus.disconnect()
 
+    async def _resolve_device_path(self, bus: Any) -> str | None:
+        """Find the SCU's BlueZ device path under whichever adapter has it.
+
+        Home Assistant may use hci1 or another adapter, so the path is not
+        necessarily under hci0. Returns None when the device object is not
+        present at all (e.g. it is reached over a remote Bluetooth proxy, which
+        cannot be bonded here anyway).
+        """
+        suffix = "/dev_" + self._address.upper().replace(":", "_")
+        try:
+            intro = await bus.introspect("org.bluez", "/")
+            mgr = bus.get_proxy_object("org.bluez", "/", intro).get_interface(
+                "org.freedesktop.DBus.ObjectManager"
+            )
+            objects = await mgr.call_get_managed_objects()
+        except Exception as err:  # noqa: BLE001 - fall back to the default adapter
+            _LOGGER.debug(
+                "BlueZ ObjectManager query failed (%s) — trying %s",
+                err, self._adapter,
+            )
+            return f"/org/bluez/{self._adapter}{suffix}"
+        for path, ifaces in objects.items():
+            if "org.bluez.Device1" in ifaces and path.endswith(suffix):
+                return path
+        return None
+
     async def _acquire_mtu(self) -> None:
+        # On BlueZ the MTU-negotiation coroutine lives on the bleak BACKEND, not
+        # always on the BleakClient facade; probe both so large frames actually
+        # ride a bigger MTU instead of silently staying at 20-byte chunks.
         acquire = getattr(self._client, "_acquire_mtu", None)
+        if acquire is None:
+            backend = getattr(self._client, "_backend", None)
+            acquire = getattr(backend, "_acquire_mtu", None)
         if acquire is not None:
             try:
                 await acquire()
@@ -453,6 +544,11 @@ class HymerBleTransport:
             if len(buf) < header:
                 return frames
             length = int.from_bytes(buf[2:6], "big")
+            if length > MAX_PIA_FRAME:
+                buf.clear()
+                raise BleTransportError(
+                    f"BLE PIA frame length {length} exceeds {MAX_PIA_FRAME}"
+                )
             total = header + length
             if len(buf) < total:
                 return frames
@@ -472,10 +568,23 @@ class HymerBleTransport:
             if response.request_id == request_id:
                 return response
 
-    async def _send_frame_await_any(self, frame: bytes, *, timeout: float) -> bytes:
+    async def _send_pair_and_await(self, frame: bytes, request_id: int) -> Any:
+        """Send PairMobileRequest and wait for the response with the matching id.
+
+        Correlates on the outer Response envelope's request id (like commands)
+        so an unsolicited push is never mistaken for the pairing result.
+        """
         await self._write_plaintext(frame)
-        deadline = asyncio.get_running_loop().time() + timeout
-        return await self._next_frame(deadline)
+        deadline = asyncio.get_running_loop().time() + REQUEST_TIMEOUT
+        while True:
+            response_frame = await self._next_frame(deadline)
+            try:
+                generic = ble_pia.decode_ble_response_frame(response_frame)
+            except ValueError:
+                continue
+            if generic.request_id != request_id:
+                continue
+            return ble_pia.decode_pair_mobile_response_frame(response_frame)
 
 
 async def async_pair_over_ble(
@@ -485,7 +594,7 @@ async def async_pair_over_ble(
     activation_token: str,
     *,
     mobile_device_name: str = "home-assistant",
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Mint an EHG remote-access refresh token by pairing with the SCU over BLE.
 
     Orchestrates the whole ceremony:
@@ -508,6 +617,9 @@ async def async_pair_over_ble(
     finally:
         await transport.stop()
 
+    status = getattr(response, "status", None)
+    if status not in (None, 0, ble_pia.PIA_STATUS_SUCCESS):
+        raise BleTransportError(f"SCU rejected pairing: status={status}")
     refresh = getattr(response, "remote_access_refresh_token", "")
     if not refresh:
         raise BleTransportError("Pairing completed but no refresh token was returned")

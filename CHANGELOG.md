@@ -6,6 +6,13 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
+- `1.1.1` — hardening pass over the 1.1.0 BLE transport (a full review-and-fix
+  loop) plus a Hassfest CI fix (manifest key ordering). Fail-closed vehicle
+  binding and a pre-pairing identity-collision check in the QR/BLE reconfigure,
+  BLE session robustness (locking, teardown, monotonic shutdown), pairing/agent
+  correctness, a clearer error taxonomy, a unit-test CI workflow, and docs
+  reconciled to the verified BLE result. BLE still off by default; HA-integration
+  BLE paths still pending live-vehicle re-verification.
 - `1.1.0` — adds a local BLE transport to the integration: control the vehicle
   over Bluetooth (with cloud/BLE transport selection) and mint the remote-access
   token by pairing over BLE from the reconfigure flow. Built from our own proven

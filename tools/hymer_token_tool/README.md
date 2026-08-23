@@ -19,8 +19,8 @@ Grand Canyon S 700, from a Linux/BlueZ host inside the vehicle):
   and the BLE PIA framing all work against the real SCU;
 - a `setValues` write was parsed and answered by the SCU with a matching
   request id and `ACCESS_DENIED`, i.e. understood but not yet authorised;
-- the app-level `PairMobileRequest` has **not** yet completed against the
-  vehicle, so no remote refresh token has been minted this way.
+- the app-level `PairMobileRequest` completed against the vehicle and the SCU
+  returned a remote-access refresh token, i.e. a token was minted this way.
 
 So the tool is a working research instrument, not a finished product. Anything
 that actuates the vehicle requires explicit confirmation (`CONFIRM=1`) and the
@@ -28,8 +28,9 @@ target component/value ids as inputs; nothing is hardcoded. Secrets are read
 from `0600` files, never from argv. See `BLE_RUNBOOK.md` for the field
 procedure, host requirements and failure signatures.
 
-The manual proxy-capture method in the main repository README remains the
-reliable way to obtain a remote refresh token today.
+The manual proxy-capture method in the main repository README is still the most
+turnkey route, but BLE pairing is now a proven alternative that needs no patched
+APK -- only a Linux/BlueZ host near the vehicle.
 
 ## Current scope
 
@@ -52,14 +53,15 @@ Implemented now:
 
 Not implemented yet:
 
-- hardware-verified end-to-end SCU pairing on a real vehicle
-- a supported token-minting workflow that should be recommended to users
+- a one-click, turnkey token-minting workflow (the BLE path is verified but
+  still hands-on: it needs a Linux/BlueZ host near the vehicle and manual steps)
 
 The native app clearly has a BLE client path plus a cloud pairing step. This tool
-now mirrors the app's local transport more closely, including the BLE/TLS path and
-an explicit bond-first option, but it still needs hardware verification against a
-real vehicle before it can be treated as a reliable minting path for the long-lived
-remote-access refresh token. Until that happens, treat it as research code only.
+now mirrors the app's local transport, including the BLE/TLS path and an explicit
+bond-first option, and has been verified end to end against a real vehicle
+(2026-08-22): bonding, TLS, `PairMobileRequest`, token minting and a control
+write. It remains hands-on research code -- a Linux/BlueZ host near the vehicle
+and manual steps are required -- rather than a turnkey product.
 
 ## Why BLE matters
 
@@ -228,9 +230,11 @@ hymer-token-tool scu-pair-mobile \
   --wake-up
 ```
 
-The live SCU commands remain early-alpha research commands because they have
-not yet been verified against a real vehicle in this environment. Do not rely
-on them yet for a live pairing attempt.
+The live SCU commands were verified against a real vehicle on 2026-08-22
+(bonding, TLS, `PairMobileRequest`, token minting and a `setValues` control
+write). They remain early-alpha and hands-on -- they need a Linux/BlueZ host
+near the vehicle and the CONNECTION button pressed -- so treat them as an
+advanced path, not a turnkey one.
 
 Research-only high-level operator flow in one command:
 
