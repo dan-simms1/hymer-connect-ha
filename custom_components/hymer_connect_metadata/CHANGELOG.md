@@ -7,13 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.0.0] - 2026-08-23
+## [2.0.0b1] - 2026-08-23
 
-Major release: the integration can now build its own runtime metadata from a
-HYMER APK, in Home Assistant, with no external toolchain — so first-time setup no
-longer requires a repository checkout or a Hermes decompiler. Existing installs
-are unaffected: the provisioning is opt-in and additive, and packs already in
-`data/` keep working.
+Beta / pre-release. Major feature: the integration can now build its own runtime
+metadata from a HYMER APK, in Home Assistant, with no external toolchain — so
+first-time setup no longer requires a repository checkout or a Hermes decompiler.
+Existing installs are unaffected: the provisioning is opt-in and additive, and
+packs already in `data/` keep working. Shipped as a beta so the in-app
+APK → pack path can be exercised on real installs before a stable 2.0.0.
 
 ### Added
 

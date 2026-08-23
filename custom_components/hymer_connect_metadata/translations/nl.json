@@ -98,7 +98,6 @@
   "issues": {
     "missing_runtime_metadata": {
       "title": "Lokale HYMER-runtime-metadata ontbreekt",
-      "description": "HYMER Connect Metadata cannot finish setup because the local runtime metadata pack is missing.\n\nMissing files: {missing_files}\n\nYou can fix this from Home Assistant: click **Fix**, then paste a HYMER Android APK URL. Home Assistant will download it and build the metadata pack automatically \u2014 no external tools needed.\n\nAlternatively (advanced): from a full checkout of this repository on any machine, prepare the metadata pack with:\n```\n{prepare_command}\n```\n\nIf the APK contains a Hermes bytecode bundle, rerun the command with `--bundle-js` or `--bundle-js-url`. Then extract the generated zip into `custom_components/hymer_connect_metadata/data/` inside the Home Assistant config directory and reload the integration.",
       "fix_flow": {
         "step": {
           "provision": {
