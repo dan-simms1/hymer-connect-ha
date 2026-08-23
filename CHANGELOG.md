@@ -6,6 +6,14 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
+- `2.0.1` — makes in-Home-Assistant metadata provisioning work for a **fresh
+  install**: the config flow now asks for a HYMER APK URL as its first step and
+  builds the pack (incl `oauth_client.json`) before sign-in, instead of
+  dead-ending because auth needs a pack that only an existing entry could
+  provision. Adds SCU Bluetooth-address discovery (pick the SCU from a list
+  instead of typing its MAC), and fixes the setup instructions accordingly
+  (first-run flow, no-decompiler note, options list, and a leftover upstream
+  signpost).
 - `2.0.0` — **stable release of the 2.0.0 line** (no code change from `2.0.0b3`;
   promoted out of beta after live verification on a vehicle). Headlines: Home
   Assistant builds its own runtime metadata from a HYMER APK in-app (pure-Python

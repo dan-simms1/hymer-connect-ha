@@ -41,15 +41,16 @@ not ship that material in git.
 
 ### Option 0 (easiest): Provision inside Home Assistant
 
-Home Assistant can now build the whole pack itself, with no external toolchain.
-When the metadata pack is missing the integration raises a **fixable Repair
-issue**: open it, paste a **direct `https://` URL** to your lawfully obtained
-APK, and Home Assistant downloads it and reconstructs the catalogs and the
-OAuth client straight from the app's Hermes bytecode (pure Python — no
-decompiler). You can also rebuild the pack any time from the integration's
-**Configure → options** dialog by supplying an APK URL. The URL must be HTTPS:
-the APK is the trust root for the whole pack, so it is never fetched over a
-channel a network attacker could tamper with.
+Home Assistant builds the whole pack itself, with no external toolchain. When
+you **add the integration** and the pack is not present yet, the setup dialog's
+first step asks for a **direct `https://` URL** to your lawfully obtained APK;
+Home Assistant downloads it and reconstructs the catalogs and the OAuth client
+straight from the app's Hermes bytecode (pure Python — no decompiler), then
+continues to sign-in. You can also rebuild the pack any time from the
+integration's **Configure → options** dialog, and an existing entry whose pack
+goes missing gets a fixable **Repair** issue that does the same thing. The URL
+must be HTTPS: the APK is the trust root for the whole pack, so it is never
+fetched over a channel a network attacker could tamper with.
 
 The remaining options below build the pack offline and copy it in by hand; use
 them only if you would rather not have Home Assistant fetch the APK.

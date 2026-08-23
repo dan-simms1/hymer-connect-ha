@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "HYMER Connect Metadata Login",
-        "description": "Enter your HYMER Connect account credentials. Prepare and install the local runtime metadata pack first, then use the same email and password as in the HYMER Connect app.",
+        "description": "Enter your HYMER Connect account credentials \u2014 the same email and password you use in the HYMER Connect app.",
         "data": {
           "brand": "Brand",
           "username": "Email",
@@ -41,6 +41,16 @@
           "qr_token": "Decode the QR code on your vehicle document (any QR reader, e.g. your phone camera) \u2014 it produces a long ~560-character token starting with \"eyJ\". Paste that whole string. It is your vehicle's owner credential, so treat it like a password. Only needed to mint a token over BLE.",
           "ble_address": "Pick your SCU if it appears in the list (it advertises as HYMER 000NNNNN), or type its Bluetooth MAC, e.g. AA:BB:CC:DD:EE:FF. Only needed to mint a token over BLE."
         }
+      },
+      "provision": {
+        "title": "Build The Runtime Metadata Pack",
+        "description": "This vehicle's runtime metadata pack is not installed yet. Paste a direct download URL to your HYMER Android APK and Home Assistant will build the pack (including the sign-in credentials) from it in place \u2014 no external tools. The link must return the .apk file itself, not a web page. To confirm the official app, check its Google Play listing (package com.ehg.hymerconnect); Play does not serve the .apk directly, so use a direct-download source you trust.",
+        "data": {
+          "apk_url": "HYMER app APK URL"
+        },
+        "data_description": {
+          "apk_url": "Must return the .apk file itself, not an HTML page."
+        }
       }
     },
     "error": {
@@ -57,7 +67,9 @@
       "invalid_qr_token": "The QR activation token was not accepted.",
       "ble_both_fields_required": "To pair over Bluetooth, provide BOTH the QR activation token and the SCU Bluetooth address.",
       "invalid_ble_address": "That is not a valid Bluetooth address. Use the form AA:BB:CC:DD:EE:FF.",
-      "ble_address_required": "A SCU Bluetooth address is required when Bluetooth control is enabled."
+      "ble_address_required": "A SCU Bluetooth address is required when Bluetooth control is enabled.",
+      "apk_url_required": "Enter the APK URL to build the metadata pack.",
+      "provision_failed": "Could not build metadata from that APK. Check the URL returns a HYMER .apk file and try again."
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",

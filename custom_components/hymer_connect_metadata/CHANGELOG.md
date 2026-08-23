@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-08-23
+
+Makes the in-Home-Assistant metadata provisioning actually work for a **fresh
+install**, plus a Bluetooth-address discovery convenience and instruction fixes.
+
+### Added
+
+- **First-run provisioning in the config flow.** Adding the integration with no
+  metadata pack no longer dead-ends at "prepare the pack first": the setup dialog
+  now asks for a HYMER **APK URL** as its first step, builds the pack (including
+  `oauth_client.json`) in place, then continues to sign-in. Previously the pack
+  had to be built offline before you could even authenticate, because sign-in
+  needs `oauth_client.json` and the Repair/options provisioning both require an
+  existing entry.
+- **SCU Bluetooth-address discovery.** The pairing (Reconfigure) and BLE-control
+  (options) forms offer a dropdown of BLE devices Home Assistant has already seen
+  that look like a HYMER SCU (matched by the `HYMER…` advertised name or the
+  SCU's vendor service UUIDs), while still allowing a manually typed MAC. Falls
+  back to a plain text field with no adapter or no match.
+
+### Fixed (docs)
+
+- README/`docs/runtime-metadata.md`: correct the first-run flow to the in-config
+  provisioning above (the "offline pack required first" wording is gone; offline
+  generation remains a genuine advanced/air-gapped alternative). Stop implying a
+  Hermes APK needs `hbc-decompiler`. List the `apk_url` + "rebuild metadata now"
+  options. Remove the last "upstream integration is the default recommendation"
+  signpost (BetaHydri attribution kept). Broaden the options dialog title beyond
+  "Display And Debug", and spell out that the QR field takes the ~560-char `eyJ…`
+  owner token decoded from the vehicle-document QR.
+
 ## [2.0.0] - 2026-08-23
 
 Stable release of the 2.0.0 line. No code change from `2.0.0b3` — this promotes

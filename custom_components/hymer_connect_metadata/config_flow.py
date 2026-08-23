@@ -148,6 +148,21 @@ def _ble_address_field(hass, default: str):
     )
 
 
+def _invalidate_all_metadata_caches() -> None:
+    """Drop every cached view of the metadata pack after (re)provisioning it."""
+    from .capability_resolver import invalidate_capability_cache
+    from .catalog import invalidate_catalog_cache
+    from .discovery import invalidate_runtime_metadata_cache
+    from .runtime_metadata import invalidate_oauth_client_cache
+    from .template_specs import invalidate_template_spec_cache
+
+    invalidate_runtime_metadata_cache()
+    invalidate_oauth_client_cache()
+    invalidate_capability_cache()
+    invalidate_template_spec_cache()
+    invalidate_catalog_cache()
+
+
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_BRAND, default="hymer"): vol.In(BRANDS),
@@ -299,6 +314,12 @@ class HymerConnectConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle the initial step."""
+        # Bootstrap: signing in and discovery both need the local metadata pack
+        # (it carries oauth_client.json). If it is missing, build it from an APK
+        # first, then return here to sign in — no external toolchain needed.
+        if user_input is None and not await self._async_metadata_present():
+            return await self.async_step_provision()
+
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -337,6 +358,52 @@ class HymerConnectConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=STEP_USER_DATA_SCHEMA,
+            errors=errors,
+        )
+
+    async def _async_metadata_present(self) -> bool:
+        """True if the local runtime metadata pack is already installed."""
+        from .runtime_metadata import ensure_runtime_metadata_present
+
+        def _check() -> bool:
+            try:
+                ensure_runtime_metadata_present()
+            except RuntimeMetadataMissingError:
+                return False
+            return True
+
+        return await self.hass.async_add_executor_job(_check)
+
+    async def async_step_provision(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Build the runtime metadata pack from an APK before first sign-in."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            apk_url = str(user_input.get(CONF_APK_URL, "") or "").strip()
+            if not apk_url:
+                errors[CONF_APK_URL] = "apk_url_required"
+            else:
+                from .apk_provision import (
+                    ApkProvisionError,
+                    async_provision_metadata_from_apk,
+                )
+
+                try:
+                    await async_provision_metadata_from_apk(self.hass, apk_url)
+                except ApkProvisionError:
+                    _LOGGER.warning(
+                        "Metadata provisioning from APK failed during setup",
+                        exc_info=True,
+                    )
+                    errors["base"] = "provision_failed"
+                else:
+                    _invalidate_all_metadata_caches()
+                    return await self.async_step_user()
+
+        return self.async_show_form(
+            step_id="provision",
+            data_schema=vol.Schema({vol.Required(CONF_APK_URL): str}),
             errors=errors,
         )
 

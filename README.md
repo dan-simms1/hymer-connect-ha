@@ -113,10 +113,11 @@ You should be comfortable with all of the following:
 ## Installation Overview
 
 1. **Install the integration** (HACS or manual).
-2. **Provide the runtime metadata pack** — Home Assistant builds it for you from
-   your HYMER APK URL (no external tools, no zip to copy).
-3. **Add the integration and sign in** with your HYMER / EHG account.
-4. **Pair over Bluetooth to mint the remote-access token** — Bluetooth is
+2. **Add the integration.** When you add it, if the runtime metadata pack is
+   missing Home Assistant first asks for your HYMER **APK URL** and builds the
+   pack in place (no external tools, no zip), then you **sign in** with your
+   HYMER / EHG account.
+3. **Pair over Bluetooth to mint the remote-access token** — Bluetooth is
    required for initial pairing, and that token is what enables live telemetry
    and control. This needs a local Bluetooth adapter near the van.
 
@@ -150,12 +151,16 @@ The integration needs a local metadata pack under
 `/config/custom_components/hymer_connect_metadata/data/` to interpret your
 vehicle. **Home Assistant builds it for you — no external toolchain, no zip.**
 
-When the pack is missing, the integration raises a fixable **Repair** issue.
-Open it and paste a **direct `https://` URL to your HYMER Android APK**; Home
-Assistant downloads it and reconstructs the catalogs and the local OAuth client
-straight from the app's Hermes bytecode, in-process (pure Python — no
-decompiler). You can rebuild the pack any time from the integration's
-**Configure → options** dialog.
+- **First-time setup.** When you add the integration and the pack is not present
+  yet, the setup dialog's **first step** asks for a **direct `https://` URL to
+  your HYMER Android APK**. Home Assistant downloads it and reconstructs the
+  catalogs and the local OAuth client straight from the app's Hermes bytecode,
+  in-process (pure Python — no decompiler), then continues to the sign-in step.
+- **Rebuilding later.** Once the integration is set up, you can rebuild the pack
+  any time from **Configure → options** (paste an APK URL and tick "rebuild
+  metadata now") — useful after a HYMER app update. If an existing entry's pack
+  ever goes missing, Home Assistant raises a fixable **Repair** issue that does
+  the same thing.
 
 - The URL must return the **`.apk` file itself**, not a web page. To identify
   the official app, check its Google Play listing and confirm the package name
@@ -183,9 +188,12 @@ decompiler). You can rebuild the pack any time from the integration's
 
 1. Go to **Settings > Devices & Services**.
 2. Add **HYMER Connect Metadata**.
-3. Select your brand.
-4. Enter your HYMER Connect username and password.
-5. Select the campervan or motorhome to add.
+3. If the runtime metadata pack is not installed yet, the first prompt asks for
+   your HYMER **APK URL** — paste it (see §2) and Home Assistant builds the pack
+   before continuing.
+4. Select your brand.
+5. Enter your HYMER Connect username and password.
+6. Select the campervan or motorhome to add.
 
 At this point the config entry exists and REST-backed vehicle identity metadata
 can load, but **live telemetry and control need the remote-access token** — mint
