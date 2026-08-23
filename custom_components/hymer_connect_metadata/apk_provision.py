@@ -6,19 +6,23 @@ clean-room overlay generator, and writes the eight ``data/*.json`` files -- the
 same pack ``scripts/prepare_runtime_metadata.py`` produces offline, but from
 within Home Assistant so users never need an external toolchain.
 
-The heavy CPU work (bytecode reconstruction + overlay generation) is offloaded
-to the executor; only the download is awaited on the event loop. The pack is
-built and validated in full before anything is published, and the eight files
+The APK is untrusted input fetched from a user-supplied URL, so the whole path
+is bounded and fail-closed: HTTPS-only (redirects included), the download is
+streamed to a size-capped spooled file (never held in memory twice), the pack
+is built + validated in full before anything is published, and the eight files
 are swapped into place transactionally (with rollback) under a lock so a
-mid-write failure can never leave a half-old/half-new pack behind.
+mid-write failure can never leave a half-old/half-new pack behind. The heavy CPU
+work (unzip + reconstruction + overlay) runs in the executor.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
+import tempfile
 from pathlib import Path
 
 from homeassistant.core import HomeAssistant
@@ -34,7 +38,8 @@ from .runtime_metadata import (
 
 _LOGGER = logging.getLogger(__name__)
 
-_MAX_APK_BYTES = 300 * 1024 * 1024  # safety cap on the download
+_MAX_APK_BYTES = 300 * 1024 * 1024  # hard cap on the download
+_SPOOL_MAX_BYTES = 32 * 1024 * 1024  # keep in RAM up to here, then spill to disk
 _DOWNLOAD_TIMEOUT = 300  # seconds
 
 # One provisioning at a time per Home Assistant instance: the repair flow and
@@ -55,11 +60,14 @@ async def async_provision_metadata_from_apk(
 ) -> list[str]:
     """Download ``apk_url`` and write the full metadata pack. Returns filenames."""
     async with _PROVISION_LOCK:
-        apk_bytes = await _async_download_apk(hass, apk_url)
-        target = Path(data_dir) if data_dir is not None else DATA_DIR
-        written = await hass.async_add_executor_job(
-            _build_and_write, apk_bytes, target
-        )
+        apk_source = await _async_download_apk(hass, apk_url)
+        try:
+            target = Path(data_dir) if data_dir is not None else DATA_DIR
+            written = await hass.async_add_executor_job(
+                _build_and_write, apk_source, target
+            )
+        finally:
+            apk_source.close()
         invalidate_oauth_client_cache()
     _LOGGER.info(
         "Provisioned %d metadata files from APK into %s", len(written), target
@@ -67,54 +75,87 @@ async def async_provision_metadata_from_apk(
     return written
 
 
-async def _async_download_apk(hass: HomeAssistant, apk_url: str) -> bytes:
+async def _async_download_apk(hass: HomeAssistant, apk_url: str):
+    """Stream the APK to a size-capped spooled temp file. Returns the open file."""
     # Require HTTPS: the APK is the trust root for the whole pack (it yields the
     # OAuth client and every catalog), so it must not be fetched over a channel
     # a network attacker can tamper with.
     if not apk_url or not apk_url.lower().startswith("https://"):
         raise ApkProvisionError("Provide an https URL that returns the .apk file.")
     session = async_get_clientsession(hass)
-    buffer = bytearray()
+    spool = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_BYTES, mode="w+b")
+    total = 0
     try:
         async with asyncio.timeout(_DOWNLOAD_TIMEOUT):
             async with session.get(apk_url) as resp:
+                # A redirect must not downgrade the scheme: reject any hop (or the
+                # final URL) that is not HTTPS.
+                for hop in (*resp.history, resp):
+                    if getattr(hop.url, "scheme", "https") != "https":
+                        raise ApkProvisionError(
+                            "APK URL redirected to a non-HTTPS location."
+                        )
                 if resp.status != 200:
                     raise ApkProvisionError(f"APK download failed: HTTP {resp.status}")
                 async for chunk in resp.content.iter_chunked(1 << 16):
-                    buffer.extend(chunk)
-                    if len(buffer) > _MAX_APK_BYTES:
+                    total += len(chunk)
+                    if total > _MAX_APK_BYTES:
                         raise ApkProvisionError("APK exceeds the size limit.")
+                    spool.write(chunk)
     except ApkProvisionError:
+        spool.close()
         raise
     except (TimeoutError, asyncio.TimeoutError) as err:
+        spool.close()
         raise ApkProvisionError("APK download timed out.") from err
     except Exception as err:  # noqa: BLE001 - surface any client error uniformly
+        spool.close()
         raise ApkProvisionError(f"APK download error: {err}") from err
-    if not buffer:
+    if not total:
+        spool.close()
         raise ApkProvisionError("APK download returned no data.")
-    return bytes(buffer)
+    spool.seek(0)
+    return spool
 
 
 def _validate_pack(outputs: dict[str, object]) -> None:
-    """Reject an implausible pack before it can overwrite a working one."""
-    components = outputs.get("component_kinds.json")
-    slots = outputs.get("sensor_labels.json")
-    vehicles = outputs.get("vehicle_catalog.json")
-    oauth = outputs.get(OAUTH_CLIENT_FILENAME)
+    """Reject an implausible pack before it can overwrite a working one.
 
-    if not isinstance(components, dict) or not components:
-        raise ApkProvisionError("APK produced no component catalog.")
-    if not isinstance(slots, dict) or not slots:
-        raise ApkProvisionError("APK produced no sensor catalog.")
-    if (
-        not isinstance(vehicles, dict)
-        or not isinstance(vehicles.get("models"), dict)
-        or not vehicles["models"]
-    ):
-        raise ApkProvisionError("APK produced no vehicle catalog.")
+    Generated payloads are wrappers like ``{"_comment": ..., "components": {}}``,
+    so the *inner* catalogs -- not just the wrapper -- must be non-empty, and the
+    OAuth header must decode to a real ``username:password`` pair.
+    """
+
+    def _nonempty_nested(name: str, key: str) -> None:
+        payload = outputs.get(name)
+        inner = payload.get(key) if isinstance(payload, dict) else None
+        if not isinstance(inner, dict) or not inner:
+            raise ApkProvisionError(f"APK produced an empty {name}.")
+
+    _nonempty_nested("component_kinds.json", "components")
+    _nonempty_nested("sensor_labels.json", "slots")
+    _nonempty_nested("vehicle_catalog.json", "models")
+
+    oauth = outputs.get(OAUTH_CLIENT_FILENAME)
     header = oauth.get("authorization_header") if isinstance(oauth, dict) else None
     if not isinstance(header, str) or not header.startswith("Basic "):
         raise ApkProvisionError("APK produced no OAuth client.")
+    try:
+        creds = base64.b64decode(header[6:], validate=True).decode("utf-8")
+    except Exception as err:  # noqa: BLE001 - malformed base64/text
+        raise ApkProvisionError("APK produced a malformed OAuth client.") from err
+    user, sep, password = creds.partition(":")
+    if not sep or not user or not password:
+        raise ApkProvisionError("APK produced an incomplete OAuth client.")
+
+    for name in (
+        "control_catalog.json",
+        "scenario_catalog.json",
+        "coverage_audit.json",
+        "support_matrix.json",
+    ):
+        if not isinstance(outputs.get(name), dict):
+            raise ApkProvisionError(f"APK produced an invalid {name}.")
 
 
 def _atomic_publish(data_dir: Path, serialized: dict[str, str]) -> None:
@@ -154,14 +195,17 @@ def _atomic_publish(data_dir: Path, serialized: dict[str, str]) -> None:
         raise ApkProvisionError(f"Could not write metadata pack: {err}") from err
 
 
-def _build_and_write(apk_bytes: bytes, data_dir: Path) -> list[str]:
+def _build_and_write(apk_source, data_dir: Path) -> list[str]:
     # Imported lazily: metadata_overlay is a heavy module only needed here.
-    from .apk_hermes import reconstruct_object_literals
-    from .apk_oauth import extract_oauth_client
+    from .apk_hermes import reconstruct_object_literals_from_bundle
+    from .apk_oauth import extract_oauth_client_from_objects, read_bundle_asset
     from .metadata_overlay import generate_overlay_from_bundle
 
     try:
-        objects = reconstruct_object_literals(apk_bytes)
+        # Unzip the bundle once (bounded), reconstruct once, and reuse the
+        # reconstructed objects for both the catalogs and the OAuth client.
+        bundle = read_bundle_asset(apk_source)
+        objects = reconstruct_object_literals_from_bundle(bundle)
         (
             components,
             slots,
@@ -177,7 +221,7 @@ def _build_and_write(apk_bytes: bytes, data_dir: Path) -> list[str]:
             SPECS_DIR / "template_specs.json",
             objects=objects,
         )
-        oauth_client = extract_oauth_client(apk_bytes)
+        oauth_client = extract_oauth_client_from_objects(objects)
     except Exception as err:
         raise ApkProvisionError(f"Could not build metadata from the APK: {err}") from err
 

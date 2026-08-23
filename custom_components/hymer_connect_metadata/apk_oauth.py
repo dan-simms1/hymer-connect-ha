@@ -33,6 +33,7 @@ HERMES_MAGIC = bytes.fromhex("c61fbc03")
 # caps sit far above that but well below anything that could exhaust the host.
 _MAX_BUNDLE_BYTES = 64 * 1024 * 1024
 _MAX_ZIP_RATIO = 200  # reject a member that inflates more than this (zip bomb)
+_MAX_ZIP_ENTRIES = 200_000  # a real APK has a few thousand; reject a dir bomb
 
 
 class OAuthExtractionError(RuntimeError):
@@ -45,9 +46,11 @@ class _Bundle:
     version: int
     function_count: int
     string_count: int
+    overflow_string_count: int
     smallstr_off: int
     overflow_off: int
     storage_off: int
+    storage_size: int
     arraybuf_off: int
     arraybuf_size: int
     objkey_off: int
@@ -99,22 +102,62 @@ def _read_bundle(raw: bytes) -> _Bundle:
     off = _align4(off); objval_off = off; _bound(off + obj_value_size, "object-value"); off += obj_value_size
     return _Bundle(
         raw=raw, version=version, function_count=function_count, string_count=string_count,
+        overflow_string_count=overflow_string_count,
         smallstr_off=smallstr_off, overflow_off=overflow_off, storage_off=storage_off,
+        storage_size=string_storage_size,
         arraybuf_off=arraybuf_off, arraybuf_size=array_buffer_size,
         objkey_off=objkey_off, objkey_size=obj_key_size,
         objval_off=objval_off, objval_size=obj_value_size,
     )
 
 
-def read_bundle_asset(apk_bytes: bytes) -> bytes:
+def _zip_entry_count(fh) -> int:
+    """Read the archive's declared total-entry count from its end-of-central-dir.
+
+    Cheap pre-check so a central-directory bomb (millions of empty entries) is
+    rejected before ``ZipFile`` allocates a ZipInfo per entry.
+    """
+    fh.seek(0, io.SEEK_END)
+    size = fh.tell()
+    scan = min(size, 65557)  # 22-byte EOCD + up to a 65535-byte comment
+    fh.seek(size - scan)
+    tail = fh.read(scan)
+    idx = tail.rfind(b"PK\x05\x06")
+    if idx < 0:
+        raise OAuthExtractionError("not a valid APK (no zip end-of-directory record)")
+    total = struct.unpack_from("<H", tail, idx + 10)[0]
+    if total != 0xFFFF:
+        return total
+    # ZIP64: the count lives in the ZIP64 EOCD record the locator points at.
+    loc = tail.rfind(b"PK\x06\x07", 0, idx)
+    if loc < 0:
+        return total
+    zip64_off = struct.unpack_from("<Q", tail, loc + 8)[0]
+    if zip64_off < 0 or zip64_off + 40 > size:
+        raise OAuthExtractionError("invalid ZIP64 end-of-directory record")
+    fh.seek(zip64_off)
+    z64 = fh.read(56)
+    if z64[:4] != b"PK\x06\x06":
+        raise OAuthExtractionError("invalid ZIP64 end-of-directory record")
+    return struct.unpack_from("<Q", z64, 32)[0]
+
+
+def read_bundle_asset(source) -> bytes:
     """Return ``assets/index.android.bundle`` from an APK, bounded against zip bombs.
 
-    The uncompressed size is capped both by the ZIP directory's declared size
-    *and* by a hard read limit, so a member whose header lies about its size
-    cannot inflate past the cap.
+    ``source`` may be raw bytes or a seekable binary file object (so a large APK
+    can be streamed to a temp file and never held twice in memory). The entry
+    count, the member's declared/actual uncompressed size and the compression
+    ratio are all bounded, so neither a central-directory bomb nor a lying member
+    header can exhaust the host.
     """
+    fh = io.BytesIO(source) if isinstance(source, (bytes, bytearray)) else source
     try:
-        with zipfile.ZipFile(io.BytesIO(apk_bytes)) as archive:
+        entries = _zip_entry_count(fh)
+        if entries > _MAX_ZIP_ENTRIES:
+            raise OAuthExtractionError("APK has too many zip entries")
+        fh.seek(0)
+        with zipfile.ZipFile(fh) as archive:  # fh not closed (we did not open it)
             try:
                 info = archive.getinfo(BUNDLE_ASSET)
             except KeyError as err:
@@ -151,21 +194,19 @@ class _StringTable:
         offset = (ent >> 1) & 0x7FFFFF
         length = (ent >> 24) & 0xFF
         if length == 0xFF:  # overflowed: real offset/length live in the overflow table
+            if offset >= b.overflow_string_count:
+                return ""
             offset, length = struct.unpack_from(
                 "<II", b.raw, b.overflow_off + offset * 8
             )
-        if is_utf16:
-            data = b.raw[b.storage_off + offset: b.storage_off + offset + length * 2]
-            return data.decode("utf-16-le", "replace")
-        data = b.raw[b.storage_off + offset: b.storage_off + offset + length]
-        return data.decode("utf-8", "replace")
-
-
-def _find_string_id(st: _StringTable, count: int, needle: str) -> int:
-    for i in range(count):
-        if st.get(i) == needle:
-            return i
-    raise OAuthExtractionError(f"string {needle!r} not present in the app bundle")
+        # Validate the (offset,length) against the string-storage section so a
+        # hostile entry can't read another section (or a multi-GB slice).
+        byte_len = length * 2 if is_utf16 else length
+        if offset < 0 or byte_len < 0 or offset + byte_len > b.storage_size:
+            return ""
+        start = b.storage_off + offset
+        data = b.raw[start: start + byte_len]
+        return data.decode("utf-16-le" if is_utf16 else "utf-8", "replace")
 
 
 def _b64_decode(text: str) -> str | None:
@@ -215,103 +256,40 @@ def _extract_from_config_object(
     return None
 
 
-def extract_oauth_client(apk_bytes: bytes) -> dict[str, str]:
-    """Return the ``oauth_client.json`` payload for a HYMER APK's bytes.
-
-    Raises OAuthExtractionError if the config object cannot be located/validated.
-    """
-    raw = read_bundle_asset(apk_bytes)
-
-    # Preferred path: reconstruct the object literals and read both credentials
-    # from the one config object that contains them (values bound to the same
-    # instruction). Reconstruction is best-effort -- if it is unavailable (e.g.
-    # a non-v96 bundle) we fall back to the anchored byte-scan, which spans
-    # v90-96. A genuine ambiguity from a successful reconstruction (more than one
-    # config object) is a real error and must propagate, not silently fall back.
-    try:
-        from .apk_hermes import reconstruct_object_literals_from_bundle
-
-        objects = reconstruct_object_literals_from_bundle(raw)
-    except Exception:  # noqa: BLE001 - reconstruction unavailable; scan is the fallback
-        objects = None
-    if objects is not None:
-        bound = _extract_from_config_object(objects)
-        if bound is not None:
-            return _client_payload(*bound)
-
-    return _extract_oauth_by_scan(raw)
-
-
-def _extract_oauth_by_scan(raw: bytes) -> dict[str, str]:
-    """Anchored byte-scan fallback over the object key/value buffers."""
-    b = _read_bundle(raw)
-    st = _StringTable(b)
-    cu_id = _find_string_id(st, b.string_count, "CLIENT_USERNAME")
-    cp_id = _find_string_id(st, b.string_count, "CLIENT_PASSWORD")
-
-    keybuf = b.raw[b.objkey_off: b.objkey_off + b.objkey_size]
-    valbuf = b.raw[b.objval_off: b.objval_off + b.objval_size]
-
-    # 1) Locate the config object's KEY run: CLIENT_USERNAME's id (uint16),
-    #    immediately followed by CLIENT_PASSWORD's id, disambiguates it.
-    want = struct.pack("<HH", cu_id, cp_id)
-    kpos = keybuf.find(want)
-    if kpos < 0:
-        raise OAuthExtractionError("CLIENT_USERNAME/PASSWORD key pair not found")
-    if keybuf.find(want, kpos + 1) != -1:
-        raise OAuthExtractionError("ambiguous CLIENT_USERNAME/PASSWORD key run")
-
-    # 2) The config object's ``CLOUD_..._URL`` keys sit contiguously right before
-    #    CLIENT_USERNAME. Scan left over those ``*_URL`` keys to count them; they
-    #    are the anchor. (Fails loudly if a future app reshuffles the layout.)
-    def key_at(byte_off: int) -> int:
-        return struct.unpack_from("<H", keybuf, byte_off)[0]
-
-    n_url = 0
-    while kpos - (n_url + 1) * 2 >= 0 and st.get(
-        key_at(kpos - (n_url + 1) * 2)
-    ).endswith("_URL"):
-        n_url += 1
-    if n_url == 0:
-        raise OAuthExtractionError("unexpected config key layout (no URL anchor)")
-
-    # 3) Find the VALUE run via that anchor: n_url contiguous string-ids whose
-    #    base64 decodes to https URLs. The value at the position right after the
-    #    URL run is CLIENT_USERNAME's value; the next is CLIENT_PASSWORD's. The
-    #    run starts at an arbitrary byte offset (serialised literals are not
-    #    width-aligned), so scan byte-by-byte. Precompute the https-URL string
-    #    ids once so the scan is a cheap set lookup. Try uint16 (ShortString)
-    #    then uint32 (LongString) literal widths.
-    https_ids = {
-        i for i in range(b.string_count)
-        if (t := _b64_decode(st.get(i))) and t.startswith("https://")
-    }
-
-    def bind_at(width: int) -> tuple[str, str] | None:
-        fmt = "<H" if width == 2 else "<I"
-        limit = len(valbuf) - width * (n_url + 2)
-        for pos in range(limit + 1):
-            ids = struct.unpack_from("<" + ("H" if width == 2 else "I") * n_url, valbuf, pos)
-            if all(i in https_ids for i in ids):
-                user_id = struct.unpack_from(fmt, valbuf, pos + n_url * width)[0]
-                pass_id = struct.unpack_from(fmt, valbuf, pos + (n_url + 1) * width)[0]
-                user = _b64_decode(st.get(user_id))
-                pw = _b64_decode(st.get(pass_id))
-                if user and pw and not user.startswith("https://"):
-                    return user, pw
-        return None
-
-    bound = bind_at(2) or bind_at(4)
-    if not bound:
-        raise OAuthExtractionError(
-            "could not bind CLIENT_USERNAME/PASSWORD to their values"
-        )
+def extract_oauth_client_from_objects(
+    objects: list[dict[str, object]],
+) -> dict[str, str]:
+    """Build the OAuth payload from already-reconstructed object literals."""
+    bound = _extract_from_config_object(objects)
+    if bound is None:
+        raise OAuthExtractionError("no OAuth config object found in the app bundle")
     return _client_payload(*bound)
 
 
+def extract_oauth_client(apk_bytes: bytes) -> dict[str, str]:
+    """Return the ``oauth_client.json`` payload for a HYMER APK's bytes.
+
+    Fail-closed: the credentials are read from the single reconstructed config
+    object that contains both keys (values bound to the same instruction). There
+    is deliberately no value-buffer byte-scan fallback -- that could pair
+    unrelated strings, and its full-table scan was itself an unbounded path.
+    Reconstruction requires Hermes v96 (what HYMER ships); any parse/limit error
+    propagates rather than being swallowed.
+    """
+    from .apk_hermes import reconstruct_object_literals_from_bundle
+
+    objects = reconstruct_object_literals_from_bundle(read_bundle_asset(apk_bytes))
+    return extract_oauth_client_from_objects(objects)
+
+
 def extract_oauth_client_from_path(apk_path: str) -> dict[str, str]:
+    from .apk_hermes import reconstruct_object_literals_from_bundle
+
     with open(apk_path, "rb") as fh:
-        return extract_oauth_client(fh.read())
+        bundle = read_bundle_asset(fh)
+    return extract_oauth_client_from_objects(
+        reconstruct_object_literals_from_bundle(bundle)
+    )
 
 
 if __name__ == "__main__":

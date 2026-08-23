@@ -276,20 +276,22 @@ _UNKNOWN = object()
 
 # The opcode table above is the v96 layout; interpreting a different version's
 # bytecode with it would silently mis-decode. HYMER ships v96, so require it
-# exactly for reconstruction (the header-only OAuth byte-scan still spans 90-96).
+# exactly for reconstruction.
 RECONSTRUCT_VERSION = 96
 
-# Resource budgets. The bundle is untrusted; a crafted one must not be able to
-# exhaust memory. The real HYMER bundle produces ~80k objects and a handful of
-# short arrays, so these ceilings sit far above legitimate output.
+# Resource budgets. The bundle is untrusted; a crafted one must not exhaust
+# memory or CPU. Calibrated against the real HYMER bundle (~100k objects, ~60k
+# functions, ~2M instructions, ~280k element edges, ~104k unique clean nodes) --
+# each cap is ~15-40x the observed value, high enough never to bite a genuine
+# app yet low enough to bound a hostile one to a few hundred MB / seconds.
 _MAX_ARRAY_INDEX = 1 << 20        # reject PutOwnByIndex targets beyond this
 _MAX_ARRAY_LEN = 1 << 20          # cap any single reconstructed list
-_MAX_OBJECTS = 4_000_000          # cap total object/array literals created
-_MAX_FILL_ELEMENTS = 16_000_000   # cap total list slots filled across the run
-_MAX_INSTRUCTIONS = 200_000_000   # decoded-instruction backstop
+_MAX_OBJECTS = 2_000_000          # total object/array literals created
+_MAX_ELEMENTS = 12_000_000        # total literal entries + array fills produced
+_MAX_INSTRUCTIONS = 32_000_000    # decoded-instruction backstop
 _MAX_CLEAN_DEPTH = 200            # nesting depth _clean will descend (well < the
 #                                   Python recursion limit, so no C-stack risk)
-_MAX_CLEAN_NODES = 8_000_000      # container nodes _clean will visit
+_MAX_CLEAN_NODES = 2_000_000      # unique container nodes _clean will visit
 
 
 def _align4(x: int) -> int:
@@ -402,7 +404,7 @@ class _Reader:
         op0_dest = _OP0_DEST
 
         instr = 0
-        fills = 0
+        elements = 0
         raw_len = len(raw)
         for foff, fsize in self._functions():
             if foff >= raw_len:
@@ -433,8 +435,9 @@ class _Reader:
                     d = dict(zip(_parse_literals(self.keybuf, keyIdx, numLit, st),
                                  _parse_literals(self.valbuf, valIdx, numLit, st)))
                     regs[dst] = d
-                    if len(objects) >= _MAX_OBJECTS:
-                        raise HermesLimitError("bundle exceeds the object budget")
+                    elements += len(d)
+                    if len(objects) >= _MAX_OBJECTS or elements > _MAX_ELEMENTS:
+                        raise HermesLimitError("bundle exceeds the reconstruction budget")
                     objects.append(d)
                 elif op == op_nawb or op == op_nawbl:
                     dst = raw[a]
@@ -446,8 +449,9 @@ class _Reader:
                     numElems = min(numElems, _MAX_ARRAY_LEN)
                     arr = _parse_literals(self.arraybuf, bufIdx, numElems, st)
                     regs[dst] = arr
-                    if len(objects) >= _MAX_OBJECTS:
-                        raise HermesLimitError("bundle exceeds the object budget")
+                    elements += len(arr)
+                    if len(objects) >= _MAX_OBJECTS or elements > _MAX_ELEMENTS:
+                        raise HermesLimitError("bundle exceeds the reconstruction budget")
                     objects.append(arr)
                 elif op == op_newobj:
                     d = {}; regs[raw[a]] = d
@@ -513,14 +517,18 @@ class _Reader:
                     idx = (raw[a + 2] if operands[2] == "UInt8"
                            else struct.unpack_from("<I", raw, a + 2)[0])
                     tgt = regs.get(obj)
-                    # Reject an attacker-controlled index that would balloon the
-                    # list, and bound the total slots filled across the run.
-                    if isinstance(tgt, list) and idx <= _MAX_ARRAY_INDEX:
+                    # Only a write into an actual list can balloon memory. A huge
+                    # index onto a non-list register is straight-line-decode noise
+                    # (the real bundle has these) and is simply ignored; a huge
+                    # index into a real list is an attack and fails closed.
+                    if isinstance(tgt, list):
+                        if idx > _MAX_ARRAY_INDEX:
+                            raise HermesLimitError("PutOwnByIndex target out of range")
                         if idx >= len(tgt):
                             grow = idx + 1 - len(tgt)
-                            fills += grow
-                            if fills > _MAX_FILL_ELEMENTS or idx + 1 > _MAX_ARRAY_LEN:
-                                raise HermesLimitError("bundle exceeds the array budget")
+                            elements += grow
+                            if elements > _MAX_ELEMENTS:
+                                raise HermesLimitError("bundle exceeds the reconstruction budget")
                             tgt.extend([None] * grow)
                         tgt[idx] = regs.get(val, _UNKNOWN)
                 elif op0_dest[op]:
@@ -537,42 +545,58 @@ class _Reader:
                 tgt[key] = val
 
 
-def _clean(root):
-    """Strip untracked markers and break register-reuse cycles.
+def _clean_all(roots):
+    """Clean every reconstructed root under ONE shared budget, with memoization.
 
-    Depth- and node-bounded, using a mutable on-path set (so there are no
-    per-node frozenset copies) and WITHOUT changing the process-wide recursion
-    limit. A crafted deep or cyclic graph therefore cannot crash the C stack or
-    blow up memory: it is truncated at the depth/node budget instead.
+    Register reuse means the roots form a shared graph, not independent trees.
+    A per-root walk would therefore re-clean (and re-count, and re-copy) shared
+    subgraphs, so a small bundle could still amplify into a huge output. This
+    walks the whole forest once: each already-cleaned node is memoized and its
+    cleaned copy reused, and a single node budget spans all roots. It stays
+    depth-bounded (well under the Python recursion limit, so no C-stack risk)
+    and cuts cycles via an on-path set. `memo` is keyed by ``id()``; the source
+    graph is held in ``roots`` for the duration, so ids cannot be recycled.
     """
     on_path: set[int] = set()
+    memo: dict[int, Any] = {}
     nodes = 0
 
     def rec(obj, depth):
         nonlocal nodes
-        if isinstance(obj, (dict, list)):
-            if depth > _MAX_CLEAN_DEPTH:
-                return None
-            oid = id(obj)
-            if oid in on_path:
-                return None
-            nodes += 1
-            if nodes > _MAX_CLEAN_NODES:
-                raise HermesLimitError("reconstructed graph exceeds the node budget")
-            on_path.add(oid)
-            try:
-                if isinstance(obj, dict):
-                    return {
-                        k: rec(v, depth + 1)
-                        for k, v in obj.items()
-                        if v is not _UNKNOWN
-                    }
-                return [rec(v, depth + 1) for v in obj]
-            finally:
-                on_path.discard(oid)
-        return obj
+        if not isinstance(obj, (dict, list)):
+            return obj
+        oid = id(obj)
+        if oid in on_path:
+            return None  # cycle
+        cached = memo.get(oid, _UNKNOWN)
+        if cached is not _UNKNOWN:
+            return cached  # shared subgraph already cleaned -> reuse, don't recount
+        if depth > _MAX_CLEAN_DEPTH:
+            return None
+        nodes += 1
+        if nodes > _MAX_CLEAN_NODES:
+            raise HermesLimitError("reconstructed graph exceeds the node budget")
+        on_path.add(oid)
+        try:
+            if isinstance(obj, dict):
+                out: Any = {
+                    k: rec(v, depth + 1)
+                    for k, v in obj.items()
+                    if v is not _UNKNOWN
+                }
+            else:
+                out = [rec(v, depth + 1) for v in obj]
+        finally:
+            on_path.discard(oid)
+        memo[oid] = out
+        return out
 
-    return rec(root, 0)
+    return [rec(root, 0) for root in roots]
+
+
+def _clean(root):
+    """Single-root convenience wrapper around :func:`_clean_all`."""
+    return _clean_all([root])[0]
 
 
 def reconstruct_object_literals(apk_bytes: bytes) -> list[dict]:
@@ -584,11 +608,13 @@ def reconstruct_object_literals_from_bundle(bundle_bytes: bytes) -> list[dict]:
     """Reconstruct object literals from an already-extracted Hermes bundle."""
     reader = _Reader(bundle_bytes)
     try:
-        return [_clean(o) for o in reader.reconstruct()]
+        return _clean_all(reader.reconstruct())
     except RecursionError as err:  # defensive: the depth cap should prevent this
         raise HermesLimitError("reconstructed graph too deep") from err
 
 
 def reconstruct_object_literals_from_path(apk_path: str) -> list[dict]:
+    # Stream from the file so the whole APK is never read into memory at once;
+    # read_bundle_asset bounds the zip entry count and the extracted bundle size.
     with open(apk_path, "rb") as fh:
-        return reconstruct_object_literals(fh.read())
+        return reconstruct_object_literals_from_bundle(read_bundle_asset(fh))

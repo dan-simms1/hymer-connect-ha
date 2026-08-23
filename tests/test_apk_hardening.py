@@ -191,6 +191,56 @@ class CleanWalkTests(unittest.TestCase):
             apk_hermes._MAX_CLEAN_NODES = original
 
 
+class ZipEntryCountTests(unittest.TestCase):
+    def test_entry_count_matches_a_normal_archive(self) -> None:
+        apk = _apk_with_bundle(_hermes_header(96))
+        self.assertEqual(apk_oauth._zip_entry_count(io.BytesIO(apk)), 1)
+
+    def test_too_many_entries_is_rejected(self) -> None:
+        apk = _apk_with_bundle(_hermes_header(96))
+        original = apk_oauth._MAX_ZIP_ENTRIES
+        apk_oauth._MAX_ZIP_ENTRIES = 0  # any archive now exceeds the cap
+        try:
+            with self.assertRaises(OAuthExtractionError):
+                apk_oauth.read_bundle_asset(apk)
+        finally:
+            apk_oauth._MAX_ZIP_ENTRIES = original
+
+
+class StringRangeTests(unittest.TestCase):
+    def test_out_of_range_string_offset_returns_empty(self) -> None:
+        raw = bytearray(200)
+        # One small-string entry whose (offset,length) runs past the storage
+        # section: offset 100000, length 5, utf-8.
+        ent = ((100000 & 0x7FFFFF) << 1) | (5 << 24)
+        struct.pack_into("<I", raw, 0, ent)
+        bundle = apk_oauth._Bundle(
+            raw=bytes(raw), version=96, function_count=0, string_count=1,
+            overflow_string_count=0, smallstr_off=0, overflow_off=50,
+            storage_off=60, storage_size=10, arraybuf_off=0, arraybuf_size=0,
+            objkey_off=0, objkey_size=0, objval_off=0, objval_size=0,
+        )
+        self.assertEqual(apk_oauth._StringTable(bundle).get(0), "")
+
+
+class CleanAmplificationTests(unittest.TestCase):
+    def test_shared_subgraph_is_cleaned_once_and_reused(self) -> None:
+        shared = {"x": 1}
+        out = apk_hermes._clean_all([{"a": shared}, {"b": shared}])
+        # Memoized: both parents point at the SAME cleaned child, so a shared
+        # subgraph cannot amplify the output.
+        self.assertIs(out[0]["a"], out[1]["b"])
+
+    def test_node_budget_spans_all_roots(self) -> None:
+        original = apk_hermes._MAX_CLEAN_NODES
+        apk_hermes._MAX_CLEAN_NODES = 3
+        try:
+            with self.assertRaises(apk_hermes.HermesLimitError):
+                apk_hermes._clean_all([{"a": 1}, {"b": 2}, {"c": 3}, {"d": 4}])
+        finally:
+            apk_hermes._MAX_CLEAN_NODES = original
+
+
 class OpcodeClassificationTests(unittest.TestCase):
     def test_producers_are_destinations_and_puts_are_not(self) -> None:
         name2op = apk_hermes._NAME2OP

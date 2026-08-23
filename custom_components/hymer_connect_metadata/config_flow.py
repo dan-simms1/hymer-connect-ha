@@ -13,8 +13,12 @@ from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 try:
     from homeassistant.config_entries import OptionsFlowWithReload
+
+    _OPTIONS_BASE_RELOADS_CURRENT = True
 except ImportError:  # pragma: no cover - compatibility with older HA cores
     from homeassistant.config_entries import OptionsFlow as OptionsFlowWithReload
+
+    _OPTIONS_BASE_RELOADS_CURRENT = False
 
 try:
     from homeassistant.data_entry_flow import AbortFlow
@@ -624,12 +628,20 @@ class HymerConnectOptionsFlow(OptionsFlowWithReload):
                     )
                     errors["base"] = "provision_failed"
                 else:
-                    # The pack is global, not per-entry: reload EVERY HYMER entry
-                    # so they all rebuild from the new metadata (each setup
-                    # re-invalidates the shared caches). OptionsFlowWithReload
-                    # only handles the current entry, and its plain-OptionsFlow
-                    # fallback reloads nothing at all.
+                    # The pack is global, not per-entry: every HYMER entry must
+                    # rebuild from the new metadata (each setup re-invalidates the
+                    # shared caches). On modern cores OptionsFlowWithReload already
+                    # reloads the CURRENT entry after this flow commits, so reload
+                    # only the others here to avoid a double reload; on the older
+                    # plain-OptionsFlow fallback nothing is auto-reloaded, so
+                    # reload them all.
+                    current_id = self._config_entry.entry_id
                     for existing in self.hass.config_entries.async_entries(DOMAIN):
+                        if (
+                            _OPTIONS_BASE_RELOADS_CURRENT
+                            and existing.entry_id == current_id
+                        ):
+                            continue
                         self.hass.async_create_task(
                             self.hass.config_entries.async_reload(existing.entry_id)
                         )

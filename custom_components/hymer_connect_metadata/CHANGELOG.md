@@ -17,22 +17,33 @@ trusted APK; existing installs are unaffected.
 
 ### Security
 
+- Bound the download and archive: stream the APK to a size-capped spooled file
+  (never held twice in memory), require **HTTPS** on the initial URL *and every
+  redirect hop*, and reject a ZIP central-directory bomb (millions of entries)
+  before the archive is parsed.
 - Bound the untrusted Hermes bundle end to end: cap the *uncompressed* bundle
-  size and compression ratio before reading it (zip-bomb defence — the download
-  cap only ever covered the compressed APK), and validate every header-derived
-  section offset against the file length so a crafted count cannot drive an
-  unbounded read.
-- Cap the reconstruction itself: reject attacker-controlled array indices and
-  bound total array fills, object count and decoded instructions, so a tiny
-  bundle can no longer balloon memory via `PutOwnByIndex`.
-- Make the object-graph cleanup iterative, depth- and node-bounded, and stop
-  raising the process-wide Python recursion limit — a crafted deep/cyclic graph
-  is now truncated instead of crashing the interpreter.
-- Require an **HTTPS** APK URL and validate strong catalog invariants before
-  publishing, so a malicious mirror or MITM cannot overwrite a working pack.
-- Publish the eight pack files **transactionally** under a lock, with rollback,
-  so an interrupted or concurrent provision can never leave a half-old/half-new
-  pack; wrap filesystem errors as `ApkProvisionError`.
+  size and compression ratio (zip-bomb defence — the download cap only covered
+  the compressed APK), validate every header-derived section offset and every
+  string entry against the file, and bound each instruction's operand reads to
+  its function body.
+- Cap the reconstruction under one shared budget: charge every literal element,
+  array fill, object and decoded instruction, and fail closed on an
+  attacker-controlled array index — so a tiny bundle cannot balloon memory via
+  repeated buffer literals or `PutOwnByIndex`.
+- Make the object-graph cleanup iterative, depth- and node-bounded across all
+  roots, with shared-subgraph memoization and no process-wide recursion-limit
+  change — a crafted deep/cyclic/shared graph is truncated, not amplified or
+  crashed. Caps are calibrated to ~15–40× the real app's output.
+- OAuth credentials come only from the single reconstructed config object (v96);
+  the unbounded value-buffer byte-scan fallback is gone, so no unrelated strings
+  can be mistaken for the secret and parse/limit errors fail closed.
+- Validate strong nested catalog invariants (and decode the Basic OAuth header
+  to a real `user:password`) before publishing, so a malicious mirror cannot
+  overwrite a working pack with an empty-but-plausible one.
+- Publish the eight pack files **transactionally** under a lock, with rollback
+  (including fresh-install removal), so an interrupted or concurrent provision
+  can never leave a half-old/half-new pack; wrap filesystem errors as
+  `ApkProvisionError`.
 
 ### Fixed
 

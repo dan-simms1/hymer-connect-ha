@@ -43,14 +43,15 @@ class RuntimeMetadataMissingError(RuntimeError):
         super().__init__(
             "HYMER runtime metadata is not available. Missing files: "
             + ", ".join(missing_files)
-            + ". From a full checkout of this repository on any machine, "
-            + "prepare the local metadata pack with `"
+            + ". The easiest fix is the Repair issue Home Assistant raises for "
+            + "this: paste an https URL to your HYMER APK and it builds the pack "
+            + "in-place (a pure-Python Hermes reader, no decompiler). To prepare "
+            + "it offline instead, run `"
             + prepare_command
-            + "`, then extract the generated zip into `"
+            + "` from a checkout of this repository, then extract the generated "
+            + "zip into `"
             + DEFAULT_HOME_ASSISTANT_CONFIG_DIR
-            + "/custom_components/hymer_connect_metadata/data/`. Supply "
-            + "`--bundle-js` or `--bundle-js-url` when the APK contains a "
-            + "Hermes bytecode bundle."
+            + "/custom_components/hymer_connect_metadata/data/`."
         )
 
 
