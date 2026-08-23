@@ -15,7 +15,6 @@ Validated against Hermes bytecode version 96 (the version HYMER ships). No
 from __future__ import annotations
 
 import struct
-import zipfile
 from typing import Any
 
 from .apk_oauth import (
@@ -29,7 +28,6 @@ from .apk_oauth import (
 class HermesLimitError(OAuthExtractionError):
     """Raised when a bundle would exceed a reconstruction resource budget."""
 
-BUNDLE_ASSET = "assets/index.android.bundle"
 
 # --- Hermes v96 opcode table (facebook/hermes main BytecodeList.def) ----------
 # Only DEFINE_OPCODE_* lines get sequential opcode numbers; DEFINE_RET_TARGET and
