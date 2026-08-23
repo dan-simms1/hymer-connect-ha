@@ -78,6 +78,76 @@ def _normalize_ble_address(value: str | None) -> str | None:
     candidate = (value or "").strip().upper()
     return candidate if _BLE_ADDRESS_RE.match(candidate) else None
 
+
+# The SCU advertises a name like ``HYMER 000NNNNN`` and these vendor services.
+# Either is enough to recognise it among the BLE devices Home Assistant has seen.
+_SCU_SERVICE_UUIDS = frozenset(
+    {
+        "fff40001-13c9-42f3-9d46-e1d1aa2a7232",  # SCU vendor power service
+        "6e400001-b5a3-f393-e0a9-e50e24dcca9e",  # Nordic UART (SCU control link)
+    }
+)
+
+
+def _discovered_scu_options(hass) -> list[dict[str, str]]:
+    """Return {value,label} entries for BLE devices that look like a HYMER SCU.
+
+    Uses the devices Home Assistant's Bluetooth stack has already seen (no active
+    scan), matched by advertised name (``HYMER…``) or a known SCU service UUID.
+    Returns an empty list when Bluetooth is unavailable or nothing matches.
+    """
+    try:
+        from homeassistant.components import bluetooth
+    except Exception:  # noqa: BLE001 - bluetooth may be absent (tests / no adapter)
+        return []
+    try:
+        infos = bluetooth.async_discovered_service_info(hass, connectable=True)
+    except Exception:  # noqa: BLE001 - bluetooth not set up / no adapter
+        return []
+    options: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for info in infos:
+        address = getattr(info, "address", None)
+        if not address or address in seen:
+            continue
+        name = getattr(info, "name", "") or ""
+        uuids = {str(u).lower() for u in (getattr(info, "service_uuids", None) or [])}
+        if not (name.upper().startswith("HYMER") or (uuids & _SCU_SERVICE_UUIDS)):
+            continue
+        seen.add(address)
+        label = f"{name or 'SCU'} ({address})"
+        rssi = getattr(info, "rssi", None)
+        if isinstance(rssi, int):
+            label = f"{label} · {rssi} dBm"
+        options.append({"value": address, "label": label})
+    return options
+
+
+def _ble_address_field(hass, default: str):
+    """Build the BLE-address form field.
+
+    A dropdown of discovered SCU devices (still allowing a manually typed MAC)
+    when Bluetooth discovery surfaces any candidates; otherwise a plain text
+    field, so the form degrades gracefully with no adapter.
+    """
+    options = _discovered_scu_options(hass)
+    if not options:
+        return str
+    try:
+        from homeassistant.helpers import selector
+    except Exception:  # noqa: BLE001 - selector helper unavailable in stubs
+        return str
+    if default and not any(option["value"] == default for option in options):
+        options = [*options, {"value": default, "label": default}]
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=options,
+            custom_value=True,
+            mode=selector.SelectSelectorMode.DROPDOWN,
+        )
+    )
+
+
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_BRAND, default="hymer"): vol.In(BRANDS),
@@ -576,7 +646,9 @@ class HymerConnectConfigFlow(ConfigFlow, domain=DOMAIN):
                         default=entry.data.get(CONF_EHG_REFRESH_TOKEN, ""),
                     ): secret,
                     vol.Optional(CONF_QR_TOKEN, default=""): secret,
-                    vol.Optional(CONF_BLE_ADDRESS, default=""): str,
+                    vol.Optional(
+                        CONF_BLE_ADDRESS, default=""
+                    ): _ble_address_field(self.hass, ""),
                 }
             ),
             errors=errors,
@@ -715,7 +787,7 @@ class HymerConnectOptionsFlow(OptionsFlowWithReload):
                     vol.Optional(
                         CONF_BLE_ADDRESS,
                         default=options[CONF_BLE_ADDRESS],
-                    ): str,
+                    ): _ble_address_field(self.hass, options[CONF_BLE_ADDRESS]),
                     vol.Optional(
                         CONF_BLE_MODE,
                         default=options[CONF_BLE_MODE],

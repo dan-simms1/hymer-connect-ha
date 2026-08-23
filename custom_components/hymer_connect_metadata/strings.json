@@ -39,7 +39,7 @@
         },
         "data_description": {
           "qr_token": "Decode the QR code on your vehicle document (any QR reader, e.g. your phone camera) \u2014 it produces a long ~560-character token starting with \"eyJ\". Paste that whole string. It is your vehicle's owner credential, so treat it like a password. Only needed to mint a token over BLE.",
-          "ble_address": "The SCU's Bluetooth MAC, e.g. AA:BB:CC:DD:EE:FF. Only needed to mint a token over BLE."
+          "ble_address": "Pick your SCU if it appears in the list (it advertises as HYMER 000NNNNN), or type its Bluetooth MAC, e.g. AA:BB:CC:DD:EE:FF. Only needed to mint a token over BLE."
         }
       }
     },
@@ -88,7 +88,7 @@
           "provision_metadata": "Rebuild metadata from the APK now"
         },
         "data_description": {
-          "ble_address": "The SCU's Bluetooth MAC, e.g. AA:BB:CC:DD:EE:FF.",
+          "ble_address": "Pick your SCU if it appears in the list (it advertises as HYMER 000NNNNN), or type its Bluetooth MAC, e.g. AA:BB:CC:DD:EE:FF.",
           "ble_mode": "fallback: try the cloud first and BLE only when the cloud fails (home HA near the van). primary: try BLE first, cloud as backup (a van-local HA).",
           "apk_url": "Direct download URL of a HYMER Android APK \u2014 the link must return the .apk file itself (e.g. from APKPure/APKMirror). Tick the box to download it and rebuild the local metadata pack in place, no external tools needed. To confirm the official app, check its Google Play listing (package com.ehg.hymerconnect); Play does not serve the .apk directly, so use a direct-download source you trust."
         }
