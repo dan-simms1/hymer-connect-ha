@@ -90,6 +90,31 @@ This branch takes a different approach:
 The aim is to keep behaviour metadata-led rather than adding more and more
 per-van branching to Python.
 
+## Why You Extract The Metadata Yourself
+
+Because this integration is metadata-driven, it needs a **runtime metadata
+pack** to work: the mapping that turns a vehicle's low-level numbered data points
+into meaningful entities — labels, units, ranges, which slots are controls,
+which make up a scenario — together with a small **OAuth client** used to sign
+in to the HYMER / EHG cloud.
+
+That mapping and that OAuth client are **HYMER's own data**, embedded inside the
+HYMER Connect Android app. They are not ours to redistribute, so this repository
+deliberately does **not** ship them — the `data/` folder and `oauth_client.json`
+are never committed to git, and no release contains them.
+
+What the project ships instead is the **capability to extract them**: a
+self-contained, pure-Python reader that reconstructs the metadata and the OAuth
+client from **your own lawfully-obtained copy of the app** (the APK), reading the
+app's compiled Hermes bytecode directly — no decompiler, no third-party tools.
+You run it against your own app artefact (Home Assistant can do this for you from
+an APK URL), the result is written only to your own Home Assistant instance, and
+it is never shared or published.
+
+In short: we can't hand you HYMER's data, but we can hand you the tool to derive
+it yourself from the app you already have, so the integration has what it needs
+without this project redistributing anything that isn't ours.
+
 ## Distinct Integration ID
 
 This integration uses the Home Assistant domain `hymer_connect_metadata`.
