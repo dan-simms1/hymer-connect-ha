@@ -74,8 +74,8 @@
     },
     "step": {
       "init": {
-        "title": "Display And Debug Options",
-        "description": "Configure optional debug entities and display units for this vehicle entry.",
+        "title": "HYMER Connect Options",
+        "description": "Display units and optional debug entities, Bluetooth control, and rebuilding the runtime metadata pack from an APK.",
         "data": {
           "show_admin_actions": "Show admin actions",
           "show_debug_diagnostics": "Show debug diagnostics",

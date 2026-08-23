@@ -396,6 +396,10 @@ The options flow currently supports:
 - Bluetooth (BLE) control: `ble_enabled`, the SCU `ble_address`, and `ble_mode`
   (`fallback` = cloud first, BLE on cloud failure; `primary` = BLE first). Off
   by default. See the Bluetooth section above.
+- Rebuild the runtime metadata pack from an APK: `apk_url` plus a transient
+  "rebuild metadata now" action. Home Assistant re-downloads the APK and
+  regenerates the pack in place (the same builder as §2). Use it after a HYMER
+  app update.
 
 Admin actions are hidden by default. That includes the Smart Unit restart
 button.
@@ -446,9 +450,6 @@ a Smart Control Unit may be a candidate:
 
 This project builds directly on Jan Tiedemann / BetaHydri's earlier HYMER
 Connect reverse-engineering and Home Assistant integration work.
-
-If you are choosing one repository to install and follow day-to-day, Jan's
-upstream integration remains the default recommendation.
 
 ## Affiliation
 
