@@ -217,6 +217,19 @@ class ZipBoundsTests(unittest.TestCase):
         with self.assertRaises(OAuthExtractionError):
             apk_oauth._check_zip_bounds(io.BytesIO(blob))
 
+    def test_zip64_locator_with_small_legacy_fields_is_rejected(self) -> None:
+        # Legacy EOCD fields are tiny (would pass a sentinel-gated check), but a
+        # ZIP64 locator sits immediately before the EOCD pointing at a ZIP64 EOCD
+        # that declares a 20 MB directory -- which is what ZipFile actually uses.
+        zip64 = b"PK\x06\x06" + struct.pack(
+            "<QHHIIQQQQ", 44, 45, 45, 0, 0, 1, 1, 20_000_000, 0
+        )
+        locator = b"PK\x06\x07" + struct.pack("<IQI", 0, 0, 1)  # reloff 0
+        eocd = b"PK\x05\x06" + struct.pack("<HHHHIIH", 0, 0, 1, 1, 100, 0, 0)
+        blob = zip64 + locator + eocd
+        with self.assertRaises(OAuthExtractionError):
+            apk_oauth._check_zip_bounds(io.BytesIO(blob))
+
 
 class StringRangeTests(unittest.TestCase):
     def test_out_of_range_string_offset_returns_empty(self) -> None:

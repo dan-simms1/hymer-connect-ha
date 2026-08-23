@@ -131,16 +131,24 @@ def _check_zip_bounds(fh) -> None:
         raise OAuthExtractionError("not a valid APK (no zip end-of-directory record)")
     total = struct.unpack_from("<H", tail, idx + 10)[0]
     size_cd = struct.unpack_from("<I", tail, idx + 12)[0]
-    if total == 0xFFFF or size_cd == 0xFFFFFFFF:
-        # ZIP64: the real count and directory size live in the ZIP64 EOCD record.
-        loc = tail.rfind(b"PK\x06\x07", 0, idx)
-        if loc >= 0:
-            zip64_off = struct.unpack_from("<Q", tail, loc + 8)[0]
-            if zip64_off < 0 or zip64_off + 56 > size:
+
+    # ZipFile uses a ZIP64 record whenever a locator sits in the 20 bytes
+    # IMMEDIATELY before the EOCD -- positionally, not gated on the legacy
+    # 0xFFFF/0xFFFFFFFF sentinels -- so mirror that exactly, otherwise an archive
+    # could declare tiny legacy values here yet make ZipFile read a large ZIP64
+    # directory.
+    eocd_abs = (size - scan) + idx
+    loc_abs = eocd_abs - 20
+    if loc_abs >= 0:
+        fh.seek(loc_abs)
+        loc = fh.read(20)
+        if len(loc) == 20 and loc[:4] == b"PK\x06\x07":
+            zip64_off = struct.unpack_from("<Q", loc, 8)[0]
+            if zip64_off < 0 or zip64_off + 48 > size:
                 raise OAuthExtractionError("invalid ZIP64 end-of-directory record")
             fh.seek(zip64_off)
             z64 = fh.read(56)
-            if z64[:4] != b"PK\x06\x06":
+            if len(z64) < 48 or z64[:4] != b"PK\x06\x06":
                 raise OAuthExtractionError("invalid ZIP64 end-of-directory record")
             total = struct.unpack_from("<Q", z64, 32)[0]
             size_cd = struct.unpack_from("<Q", z64, 40)[0]
