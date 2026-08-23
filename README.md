@@ -199,8 +199,18 @@ Assistant — it is a required part of first-time setup for live telemetry and
 control.
 
 1. Open the integration's **Reconfigure** flow.
-2. Enter the vehicle's **QR activation-code** text and the SCU's **Bluetooth
-   address**.
+2. Provide two values, both from your **vehicle document** (the paperwork that
+   came with the van):
+   - **QR activation token.** Your vehicle document has a **QR code**. Decode it
+     with any QR reader — your phone's camera works — and it produces a long
+     (~560-character) token starting with `eyJ…`. **Paste that whole string**
+     into the field. There is no in-app camera scan; you decode the QR yourself
+     and paste the text. Treat this token like a password: it is your vehicle's
+     owner credential.
+   - **SCU Bluetooth address.** The SCU's Bluetooth MAC, e.g.
+     `AA:BB:CC:DD:EE:FF`. It corresponds to the SCU ID on the vehicle document,
+     and the SCU advertises as `HYMER 000NNNNN` if you scan for Bluetooth
+     devices near the van.
 3. Press the **CONNECTION** button on the vehicle, then submit.
 
 Home Assistant bonds with the SCU, performs the TLS handshake and the pairing

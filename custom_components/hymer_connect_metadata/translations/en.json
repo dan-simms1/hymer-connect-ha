@@ -38,7 +38,7 @@
           "ble_address": "SCU Bluetooth address (to pair over Bluetooth)"
         },
         "data_description": {
-          "qr_token": "The text encoded in the vehicle's QR code. Only needed to mint a token over BLE.",
+          "qr_token": "Decode the QR code on your vehicle document (any QR reader, e.g. your phone camera) \u2014 it produces a long ~560-character token starting with \"eyJ\". Paste that whole string. It is your vehicle's owner credential, so treat it like a password. Only needed to mint a token over BLE.",
           "ble_address": "The SCU's Bluetooth MAC, e.g. AA:BB:CC:DD:EE:FF. Only needed to mint a token over BLE."
         }
       }
