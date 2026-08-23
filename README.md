@@ -45,13 +45,8 @@ or motorhome and map them onto useful Home Assistant entities.
 This repository is a metadata-driven derivative branch of the earlier HYMER
 Home Assistant work started by Jan Tiedemann (`BetaHydri`).
 
-If you want the more established and broadly tested integration, use Jan's
-repository:
-
-- https://github.com/BetaHydri/hymer-connect-ha
-
-This repository exists for people who specifically want to test the
-metadata-driven approach.
+This repository exists for people who specifically want the metadata-driven
+approach.
 
 Jan did the original reverse-engineering and Home Assistant integration work,
 and this repository builds on that foundation. He has reviewed this branch and
@@ -154,6 +149,15 @@ The integration expects a local metadata pack under:
 
 - `/config/custom_components/hymer_connect_metadata/data/`
 
+> [!TIP]
+> **Easiest: let Home Assistant build the pack itself.** If the pack is missing,
+> the integration raises a fixable **Repair** issue — paste a direct **`https://`**
+> URL to your HYMER APK and Home Assistant reconstructs the catalogs and the
+> OAuth client from the app's bytecode in-process (pure Python, no decompiler,
+> no external toolchain). You can also rebuild it any time from the integration's
+> **Configure → options** dialog. The steps below are the offline alternative if
+> you would rather not have Home Assistant fetch the APK.
+
 Generate that pack from a full checkout of this repository with:
 
 ```bash
@@ -211,19 +215,10 @@ specific one.
 
 If you are working from a downloaded file, use `--apk-path`.
 
-If the APK contains Hermes bytecode, the script can decompile it locally when
-you provide `hbc-decompiler`. This project does not bundle that tool; the
-workflow was validated with `hermes-dec` 0.1.3:
-
-```bash
-python3 scripts/prepare_runtime_metadata.py \
-  --apk-path ~/Downloads/com.ehg.hymerconnect.apk \
-  --hbc-decompiler /path/to/hbc-decompiler \
-  --zip-out hymer_connect_metadata_runtime_metadata.zip
-```
-
-You can still provide a pre-expanded pseudo-JS bundle with `--bundle-js` if you
-already generated one yourself.
+The script reconstructs the app's Hermes bytecode with a built-in pure-Python
+reader, so **no decompiler is required** for a normal APK — just point it at the
+file. (The older `--hbc-decompiler` / `--bundle-js` options still exist for
+anyone who already has a pseudo-JS bundle, but they are optional.)
 
 Further detail:
 
@@ -310,11 +305,6 @@ work over a remote Bluetooth proxy. See
 The manual proxy-based capture flow (patched Android APK + `mitmproxy`) remains
 available and is the fallback when Bluetooth is not an option.
 
-For the currently maintained step-by-step instructions, follow Jan's upstream
-guide:
-
-- https://github.com/BetaHydri/hymer-connect-ha#obtaining-the-ehg-refresh-token
-
 At a high level:
 
 1. patch the Android app for local proxy inspection
@@ -328,6 +318,13 @@ At a high level:
 > configuration details.
 
 ## Alternative Desktop Token Tool
+
+> [!NOTE]
+> This tool is **archived and kept for research only**. It lives under
+> `tools/hymer_token_tool/` and is no longer maintained. The supported
+> way to mint the token is now the integration's BLE **Reconfigure** flow (see
+> above); this desktop tool remains as a reference for the proven BLE/TLS
+> pairing exchange.
 
 This repository also includes `tools/hymer_token_tool/`.
 

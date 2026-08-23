@@ -6,6 +6,15 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
+- `2.0.0` — **stable release of the 2.0.0 line** (no code change from `2.0.0b3`;
+  promoted out of beta after live verification on a vehicle). Headlines: Home
+  Assistant builds its own runtime metadata from a HYMER APK in-app (pure-Python
+  Hermes reader, no decompiler) via a Repair flow / options action; a
+  security-hardened, fully-bounded ingestion path for the untrusted APK (from a
+  three-round external review); and the battery/scenario/dashboard fixes. Repo
+  tidy-up: the desktop token tool marked archived / research-only in place, the
+  "use the upstream repo" signposts removed (BetaHydri attribution kept), and the
+  README metadata section updated to the in-HA flow.
 - `2.0.0b3` (beta) — security and robustness hardening of the in-HA APK
   provisioning, from a full external review. The APK is untrusted input parsed
   inside Home Assistant, so every read and reconstruction is now bounded and

@@ -1,5 +1,11 @@
 # HYMER Token Tool
 
+> [!NOTE]
+> **Archived — research reference only, no longer maintained.** The supported
+> way to mint the remote-access token is now the integration's BLE
+> **Reconfigure** flow inside Home Assistant. This tool is retained here as a
+> reference implementation of the proven BLE/TLS pairing exchange.
+
 Standalone cross-platform Python utility for HYMER / EHG account login, vehicle
 discovery, remote-access token validation, and BLE pairing preflight.
 

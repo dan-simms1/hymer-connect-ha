@@ -90,7 +90,7 @@
         "data_description": {
           "ble_address": "The SCU's Bluetooth MAC, e.g. AA:BB:CC:DD:EE:FF.",
           "ble_mode": "fallback: try the cloud first and BLE only when the cloud fails (home HA near the van). primary: try BLE first, cloud as backup (a van-local HA).",
-          "apk_url": "Direct download URL of a HYMER Android APK \u2014 the link must return the .apk file itself (e.g. from APKPure/APKMirror). Tick the box to download it and rebuild the local metadata pack in place, no external tools needed."
+          "apk_url": "Direct download URL of a HYMER Android APK \u2014 the link must return the .apk file itself (e.g. from APKPure/APKMirror). Tick the box to download it and rebuild the local metadata pack in place, no external tools needed. To confirm the official app, check its Google Play listing (package com.ehg.hymerconnect); Play does not serve the .apk directly, so use a direct-download source you trust."
         }
       }
     }
@@ -102,7 +102,7 @@
         "step": {
           "provision": {
             "title": "Build metadata from a HYMER APK",
-            "description": "Paste a direct download URL of a HYMER Android APK (the link must return the .apk file itself, e.g. from APKPure/APKMirror). Home Assistant will download it and build the local metadata pack in-place \u2014 no external tools needed \u2014 then reload the integration.",
+            "description": "Paste a direct download URL of a HYMER Android APK (the link must return the .apk file itself, e.g. from APKPure/APKMirror). Home Assistant will download it and build the local metadata pack in-place \u2014 no external tools needed \u2014 then reload the integration. To confirm the official app, check its Google Play listing (package com.ehg.hymerconnect); Play does not serve the .apk directly, so use a direct-download source you trust.",
             "data": {
               "apk_url": "HYMER app APK URL"
             },

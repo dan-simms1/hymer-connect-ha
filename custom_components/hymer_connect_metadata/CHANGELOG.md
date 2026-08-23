@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-23
+
+Stable release of the 2.0.0 line. No code change from `2.0.0b3` — this promotes
+the beta out of pre-release after live verification on a vehicle (cloud control
+and the regenerated dashboard confirmed on a Grand Canyon S 700).
+
+Headlines, consolidated from the beta entries below:
+
+- **Home Assistant can build its own runtime metadata from a HYMER APK, in-app,
+  with no external toolchain.** A pure-Python Hermes-bytecode reader reconstructs
+  the catalogs (including nested ranges, enum options and scenario actions) and
+  the OAuth client straight from the app's bytecode — no `hermes-dec`, no
+  decompiler — wired into a fixable Repair flow and an options action. The
+  offline `prepare_runtime_metadata.py` no longer needs a decompiler either.
+- **Security-hardened APK ingestion.** The APK is untrusted input parsed inside
+  the HA process, so the whole path is bounded and fail-closed: HTTPS-only
+  (redirects included), streamed size-capped download, ZIP central-directory and
+  bundle-size caps, a single shared reconstruction budget with a memoized graph
+  clean, structural OAuth binding, strong catalog validation, and a transactional
+  locked pack swap with rollback. (Full external review over three rounds.)
+- **Battery, scenario and dashboard fixes** (generic across van types): correct
+  leisure/vehicle battery labels and the BMS "time remaining" sentinel, built-in
+  scenarios surfaced, and dashboard tabs aligned to the HYMER app.
+- **Docs & repo tidy-up:** the desktop token tool at `tools/hymer_token_tool/`
+  is now clearly marked archived / research-only (unmaintained); the
+  "use/follow the upstream repository" signposts removed from the README
+  while keeping the BetaHydri attribution and `ATTRIBUTION.md`; and the README
+  metadata section rewritten around the in-HA provisioning flow (no decompiler).
+
+See [2.0.0b1]–[2.0.0b3] for the detailed change list.
+
 ## [2.0.0b3] - 2026-08-23
 
 Security and robustness hardening of the in-Home-Assistant APK provisioning,
