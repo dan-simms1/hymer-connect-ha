@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-23
+
+Major release: the integration can now build its own runtime metadata from a
+HYMER APK, in Home Assistant, with no external toolchain — so first-time setup no
+longer requires a repository checkout or a Hermes decompiler. Existing installs
+are unaffected: the provisioning is opt-in and additive, and packs already in
+`data/` keep working.
+
+### Added
+
+- **Self-provision the runtime metadata pack from a HYMER APK, inside Home
+  Assistant — no external toolchain.** Point the integration at a HYMER Android
+  APK URL and it downloads the APK and rebuilds the local `data/` pack
+  (component/sensor/control/vehicle/scenario catalogs, coverage/support matrices,
+  and the OAuth client) entirely in-process. Two entry points:
+  - **Repair flow (first-time setup):** when the metadata pack is missing the
+    "runtime metadata is missing" repair is now **fixable** — click *Fix*, paste
+    an APK URL, and Home Assistant builds the pack and reloads the integration.
+  - **Options (rebuild):** the integration's options gained an *APK URL* field
+    and a *Rebuild metadata from the APK now* action, e.g. after a HYMER app
+    update adds new components or sensors.
+
+- **A pure-Python Hermes-bytecode reader (`apk_hermes.py`).** The HYMER app is a
+  React-Native/Hermes build; its runtime metadata lives in JS object literals
+  compiled to Hermes bytecode. This reconstructs those literals — **including the
+  nested `range`/enum options and scenario action lists** — by parsing the Hermes
+  function table and interpreting each function's object/array-construction
+  opcodes with register tracking. No `hermes-dec`, no decompiler, no third-party
+  dependencies. `apk_oauth.py` recovers the OAuth client from the same bytecode.
+  Validated against Hermes bytecode version 96 (the version HYMER ships); it
+  refuses unknown versions loudly rather than mis-parsing.
+
+- **The clean-room catalog generator now ships inside the integration**
+  (`metadata_overlay.py`), so the whole APK → pack pipeline runs under Home
+  Assistant. The offline `scripts/prepare_runtime_metadata.py` still works and,
+  given only an APK, no longer needs `--hbc-decompiler`; the `scripts/` modules
+  are thin re-export shims over the shipped code.
+
+### Changed
+
+- The download is awaited on the event loop (with size and timeout caps); the
+  heavy bytecode reconstruction and catalog generation run in the executor.
+- The "runtime metadata missing" repair issue explains the in-app fix first, with
+  the offline command retained as an advanced fallback.
+
 ## [1.1.1] - 2026-08-23
 
 Hardening pass over the 1.1.0 BLE transport (a full review-and-fix loop), plus a

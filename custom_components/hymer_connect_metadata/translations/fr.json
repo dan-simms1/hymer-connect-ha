@@ -68,7 +68,9 @@
   "options": {
     "error": {
       "ble_address_required": "A SCU Bluetooth address is required when Bluetooth control is enabled.",
-      "invalid_ble_address": "That is not a valid Bluetooth address. Use the form AA:BB:CC:DD:EE:FF."
+      "invalid_ble_address": "That is not a valid Bluetooth address. Use the form AA:BB:CC:DD:EE:FF.",
+      "apk_url_required": "Enter the APK URL to rebuild the metadata.",
+      "provision_failed": "Could not build metadata from that APK. Check the URL returns a HYMER .apk file and try again."
     },
     "step": {
       "init": {
@@ -81,11 +83,14 @@
           "use_fahrenheit": "Afficher les temp\u00e9ratures en Fahrenheit",
           "ble_enabled": "Enable Bluetooth (BLE) control",
           "ble_address": "SCU Bluetooth address",
-          "ble_mode": "Bluetooth mode (fallback = cloud first; primary = BLE first)"
+          "ble_mode": "Bluetooth mode (fallback = cloud first; primary = BLE first)",
+          "apk_url": "HYMER app APK URL (to auto-build the metadata pack)",
+          "provision_metadata": "Rebuild metadata from the APK now"
         },
         "data_description": {
           "ble_address": "The SCU's Bluetooth MAC, e.g. AA:BB:CC:DD:EE:FF.",
-          "ble_mode": "fallback: try the cloud first and BLE only when the cloud fails (home HA near the van). primary: try BLE first, cloud as backup (a van-local HA)."
+          "ble_mode": "fallback: try the cloud first and BLE only when the cloud fails (home HA near the van). primary: try BLE first, cloud as backup (a van-local HA).",
+          "apk_url": "Direct download URL of a HYMER Android APK \u2014 the link must return the .apk file itself (e.g. from APKPure/APKMirror). Tick the box to download it and rebuild the local metadata pack in place, no external tools needed."
         }
       }
     }
@@ -93,7 +98,25 @@
   "issues": {
     "missing_runtime_metadata": {
       "title": "Les m\u00e9tadonn\u00e9es runtime HYMER locales sont manquantes",
-      "description": "HYMER Connect Metadata ne peut pas terminer la configuration car le pack local de m\u00e9tadonn\u00e9es runtime est manquant.\n\nFichiers manquants : {missing_files}\n\nDepuis un checkout complet de ce d\u00e9p\u00f4t sur n'importe quelle machine, pr\u00e9parez le pack de m\u00e9tadonn\u00e9es avec :\n```\n{prepare_command}\n```\n\nSi l'APK contient un bundle Hermes bytecode, relancez la commande avec `--bundle-js` ou `--bundle-js-url`. Extrayez ensuite le fichier zip g\u00e9n\u00e9r\u00e9 dans `custom_components/hymer_connect_metadata/data/` dans le r\u00e9pertoire de configuration Home Assistant et rechargez l'int\u00e9gration."
+      "description": "HYMER Connect Metadata cannot finish setup because the local runtime metadata pack is missing.\n\nMissing files: {missing_files}\n\nYou can fix this from Home Assistant: click **Fix**, then paste a HYMER Android APK URL. Home Assistant will download it and build the metadata pack automatically \u2014 no external tools needed.\n\nAlternatively (advanced): from a full checkout of this repository on any machine, prepare the metadata pack with:\n```\n{prepare_command}\n```\n\nIf the APK contains a Hermes bytecode bundle, rerun the command with `--bundle-js` or `--bundle-js-url`. Then extract the generated zip into `custom_components/hymer_connect_metadata/data/` inside the Home Assistant config directory and reload the integration.",
+      "fix_flow": {
+        "step": {
+          "provision": {
+            "title": "Build metadata from a HYMER APK",
+            "description": "Paste a direct download URL of a HYMER Android APK (the link must return the .apk file itself, e.g. from APKPure/APKMirror). Home Assistant will download it and build the local metadata pack in-place \u2014 no external tools needed \u2014 then reload the integration.",
+            "data": {
+              "apk_url": "HYMER app APK URL"
+            },
+            "data_description": {
+              "apk_url": "Must return the .apk file itself, not an HTML page."
+            }
+          }
+        },
+        "error": {
+          "apk_url_required": "Enter the APK URL to build the metadata.",
+          "provision_failed": "Could not build metadata from that APK. Check the URL returns a HYMER .apk file and try again."
+        }
+      }
     }
   },
   "entity": {

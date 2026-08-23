@@ -8,7 +8,6 @@ from homeassistant.helpers import issue_registry as ir
 from .const import DOMAIN
 from .runtime_metadata import default_prepare_command
 
-
 MISSING_RUNTIME_METADATA_ISSUE_ID = "missing_runtime_metadata"
 REPOSITORY_URL = "https://github.com/dan-simms1/hymer-connect-ha"
 RUNTIME_METADATA_DOCS_URL = f"{REPOSITORY_URL}/blob/main/docs/runtime-metadata.md"
@@ -23,7 +22,7 @@ def async_create_missing_runtime_metadata_issue(
         hass,
         DOMAIN,
         MISSING_RUNTIME_METADATA_ISSUE_ID,
-        is_fixable=False,
+        is_fixable=True,
         severity=ir.IssueSeverity.ERROR,
         learn_more_url=RUNTIME_METADATA_DOCS_URL,
         translation_key=MISSING_RUNTIME_METADATA_ISSUE_ID,

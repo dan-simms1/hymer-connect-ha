@@ -21,16 +21,12 @@ if "custom_components.hymer_connect_metadata" not in sys.modules:
     _ig.__path__ = [str(_ROOT / "custom_components" / "hymer_connect_metadata")]
     sys.modules["custom_components.hymer_connect_metadata"] = _ig
 
-from custom_components.hymer_connect_metadata.metadata_overlay import *
-from custom_components.hymer_connect_metadata.metadata_overlay import (  # noqa: F401
-    DEFAULT_PIA_DECODER,
-    DEFAULT_PROVIDER_SPECS,
-    DEFAULT_TEMPLATE_SPECS,
-    _normalize_signed_32,
-    generate_overlay,
-    generate_overlay_from_bundle,
-    main,
+from custom_components.hymer_connect_metadata.apk_oauth import *
+from custom_components.hymer_connect_metadata.apk_oauth import (  # noqa: F401
+    OAuthExtractionError,
+    _b64_decode,
+    _read_bundle,
+    _StringTable,
+    extract_oauth_client,
+    extract_oauth_client_from_path,
 )
-
-if __name__ == "__main__":
-    main()

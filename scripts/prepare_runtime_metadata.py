@@ -170,11 +170,19 @@ def _decompile_hermes_bundle(
     return destination.resolve()
 
 
-def _resolve_expanded_bundle(args: argparse.Namespace, work_dir: Path) -> Path:
+def _resolve_expanded_bundle(
+    args: argparse.Namespace, work_dir: Path
+) -> tuple[Path | None, Path | None]:
+    """Return (bundle_js_path_or_None, apk_path_or_None).
+
+    The bundle.js path is None when the source is a Hermes-bytecode APK and no
+    ``--hbc-decompiler`` was given: the caller then reconstructs the object
+    literals straight from the APK with ``hermes_apk_extract`` (no decompiler).
+    """
     if args.bundle_js:
-        return args.bundle_js.resolve()
+        return args.bundle_js.resolve(), None
     if args.bundle_js_url:
-        return _download(args.bundle_js_url, work_dir / "bundle.js").resolve()
+        return _download(args.bundle_js_url, work_dir / "bundle.js").resolve(), None
 
     apk_path: Path | None = None
     if args.apk_path:
@@ -187,20 +195,14 @@ def _resolve_expanded_bundle(args: argparse.Namespace, work_dir: Path) -> Path:
 
     raw_bundle = _extract_bundle_from_apk(apk_path, work_dir / "index.android.bundle").resolve()
     if _is_probably_text_bundle(raw_bundle):
-        return raw_bundle
+        return raw_bundle, apk_path
     if args.hbc_decompiler:
-        return _decompile_hermes_bundle(
-            raw_bundle,
-            work_dir / "bundle.js",
-            args.hbc_decompiler,
+        return (
+            _decompile_hermes_bundle(raw_bundle, work_dir / "bundle.js", args.hbc_decompiler),
+            apk_path,
         )
-
-    raise RuntimeError(
-        "The APK contains a Hermes bytecode bundle, not an expanded bundle.js. "
-        "Rerun with `--hbc-decompiler /path/to/hbc-decompiler` to decompile it "
-        "locally, or provide an expanded pseudo-JS bundle with "
-        "`--bundle-js /path/to/bundle.js` or `--bundle-js-url <url>`."
-    )
+    # Hermes bytecode, no decompiler: reconstruct object literals from the APK.
+    return None, apk_path
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -236,7 +238,7 @@ def _extract_oauth_client_payload(bundle_path: Path) -> dict[str, Any]:
         password_match.group(1),
         field_name="CLIENT_PASSWORD",
     )
-    basic_auth = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode(
+    basic_auth = base64.b64encode(f"{username}:{password}".encode()).decode(
         "ascii"
     )
     return {
@@ -286,7 +288,15 @@ def main() -> None:
     args = parser.parse_args()
 
     work_dir = args.work_dir.resolve()
-    bundle_path = _resolve_expanded_bundle(args, work_dir)
+    bundle_path, apk_path = _resolve_expanded_bundle(args, work_dir)
+
+    # A Hermes APK with no decompiler is read directly: reconstruct the object
+    # literals (catalogs) and extract the OAuth client from the bytecode.
+    objects = None
+    if bundle_path is None:
+        from hermes_apk_extract import reconstruct_object_literals_from_path
+
+        objects = reconstruct_object_literals_from_path(str(apk_path))
 
     (
         generated_components,
@@ -297,12 +307,18 @@ def main() -> None:
         generated_coverage,
         generated_support_matrix,
     ) = generate_overlay_from_bundle(
-        bundle_path,
+        bundle_path or (work_dir / "__no_bundle__"),
         args.pia_decoder.resolve(),
         args.provider_specs.resolve(),
         args.template_specs.resolve(),
+        objects=objects,
     )
-    generated_oauth_client = _extract_oauth_client_payload(bundle_path)
+    if bundle_path is not None:
+        generated_oauth_client = _extract_oauth_client_payload(bundle_path)
+    else:
+        from extract_oauth_from_apk import extract_oauth_client_from_path
+
+        generated_oauth_client = extract_oauth_client_from_path(str(apk_path))
 
     outputs = {
         "component_kinds.json": generated_components,
@@ -324,7 +340,7 @@ def main() -> None:
         print(f"Wrote metadata transfer pack to {zip_path}")
 
     print(f"Prepared runtime metadata in {data_dir}")
-    print(f"Expanded bundle source: {bundle_path}")
+    print(f"Metadata source: {bundle_path or f'{apk_path} (Hermes bytecode, reconstructed)'}")
     print(
         "Generated files:",
         ", ".join(sorted(outputs)),

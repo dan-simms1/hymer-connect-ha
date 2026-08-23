@@ -32,11 +32,13 @@ from .const import (
     BLE_MODE_PRIMARY,
     BRANDS,
     CONF_ACCESS_TOKEN,
+    CONF_APK_URL,
     CONF_BLE_ADDRESS,
     CONF_BLE_ENABLED,
     CONF_BLE_MODE,
     CONF_BRAND,
     CONF_EHG_REFRESH_TOKEN,
+    CONF_PROVISION_METADATA,
     CONF_QR_TOKEN,
     CONF_REFRESH_TOKEN,
     CONF_SCU_URN,
@@ -600,6 +602,28 @@ class HymerConnectOptionsFlow(OptionsFlowWithReload):
                     errors[CONF_BLE_ADDRESS] = "invalid_ble_address"
                 else:
                     user_input[CONF_BLE_ADDRESS] = normalized
+
+            # Self-provision the runtime metadata pack from a HYMER APK. The
+            # checkbox is a transient action, not a stored option.
+            apk_url = str(user_input.get(CONF_APK_URL, "") or "").strip()
+            user_input[CONF_APK_URL] = apk_url
+            provision = bool(user_input.pop(CONF_PROVISION_METADATA, False))
+            if provision and not apk_url:
+                errors[CONF_APK_URL] = "apk_url_required"
+            elif provision and not errors:
+                from .apk_provision import (
+                    ApkProvisionError,
+                    async_provision_metadata_from_apk,
+                )
+
+                try:
+                    await async_provision_metadata_from_apk(self.hass, apk_url)
+                except ApkProvisionError:
+                    _LOGGER.warning(
+                        "Metadata provisioning from APK failed", exc_info=True
+                    )
+                    errors["base"] = "provision_failed"
+
             if not errors:
                 return self.async_create_entry(title="", data=user_input)
             # Re-show with the user's values so they can fix the address.
@@ -636,6 +660,10 @@ class HymerConnectOptionsFlow(OptionsFlowWithReload):
                 CONF_BLE_MODE,
                 BLE_MODE_FALLBACK,
             ),
+            CONF_APK_URL: source.get(
+                CONF_APK_URL,
+                "",
+            ),
         }
         return self.async_show_form(
             step_id="init",
@@ -670,6 +698,14 @@ class HymerConnectOptionsFlow(OptionsFlowWithReload):
                         CONF_BLE_MODE,
                         default=options[CONF_BLE_MODE],
                     ): vol.In([BLE_MODE_FALLBACK, BLE_MODE_PRIMARY]),
+                    vol.Optional(
+                        CONF_APK_URL,
+                        default=options[CONF_APK_URL],
+                    ): str,
+                    vol.Optional(
+                        CONF_PROVISION_METADATA,
+                        default=False,
+                    ): bool,
                 }
             ),
         )

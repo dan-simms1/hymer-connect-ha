@@ -2802,14 +2802,14 @@ class GeneratorAndEntityTests(unittest.TestCase):
             args = prepare_runtime_metadata.build_parser().parse_args(
                 ["--apk-path", str(apk_path), "--hbc-decompiler", str(decompiler)]
             )
-            bundle_path = prepare_runtime_metadata._resolve_expanded_bundle(
+            bundle_path, _apk = prepare_runtime_metadata._resolve_expanded_bundle(
                 args, tmp_path / "work"
             )
 
             self.assertEqual(bundle_path.name, "bundle.js")
             self.assertIn("_fun0", bundle_path.read_text())
 
-    def test_prepare_runtime_metadata_explains_hermes_without_decompiler(self) -> None:
+    def test_prepare_runtime_metadata_reconstructs_hermes_without_decompiler(self) -> None:
         from scripts import prepare_runtime_metadata
 
         with TemporaryDirectory() as tmpdir:
@@ -2825,8 +2825,13 @@ class GeneratorAndEntityTests(unittest.TestCase):
                 ["--apk-path", str(apk_path)]
             )
 
-            with self.assertRaisesRegex(RuntimeError, "--hbc-decompiler"):
-                prepare_runtime_metadata._resolve_expanded_bundle(args, tmp_path / "work")
+            # A Hermes APK with no decompiler is reconstructed straight from the
+            # APK: bundle.js is None and the APK path is returned instead.
+            bundle_path, resolved_apk = prepare_runtime_metadata._resolve_expanded_bundle(
+                args, tmp_path / "work"
+            )
+            self.assertIsNone(bundle_path)
+            self.assertEqual(resolved_apk, apk_path.resolve())
 
     def test_prepare_runtime_metadata_zip_preserves_home_assistant_layout(self) -> None:
         from scripts import prepare_runtime_metadata

@@ -85,6 +85,8 @@ CONF_BLE_ENABLED = "ble_enabled"
 CONF_BLE_ADDRESS = "ble_address"
 CONF_BLE_MODE = "ble_mode"
 CONF_QR_TOKEN = "qr_token"  # vehicle QR activation token, for BLE pairing
+CONF_APK_URL = "apk_url"  # URL of a HYMER Android APK, to self-provision metadata
+CONF_PROVISION_METADATA = "provision_metadata"  # transient: rebuild the pack now
 #: cloud is tried first, BLE is the fallback (home HA near the van, LTE flaky)
 BLE_MODE_FALLBACK = "fallback"
 #: BLE is tried first, cloud is the fallback (a van-local HA)

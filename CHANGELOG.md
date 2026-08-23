@@ -6,6 +6,14 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
+- `2.0.0` — **the integration can build its own runtime metadata from a HYMER
+  APK, inside Home Assistant, with no external toolchain.** A pure-Python
+  Hermes-bytecode reader reconstructs the catalog object literals (including
+  nested ranges, enum options and scenario actions) and the OAuth client
+  straight from the app's bytecode — no `hermes-dec`, no decompiler. Wired into a
+  fixable repair flow (first-time setup) and an options action (rebuild). The
+  offline `prepare_runtime_metadata.py` no longer needs a decompiler either.
+  Additive and backward-compatible for existing installs.
 - `1.1.1` — hardening pass over the 1.1.0 BLE transport (a full review-and-fix
   loop) plus a Hassfest CI fix (manifest key ordering). Fail-closed vehicle
   binding and a pre-pairing identity-collision check in the QR/BLE reconfigure,
