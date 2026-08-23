@@ -219,9 +219,9 @@ class DashboardGenerationTests(unittest.TestCase):
 
         titles = [view["title"] for view in config["views"]]
         self.assertEqual(titles[0], "Dashboard")
-        self.assertIn("Info", titles)
+        self.assertIn("Vehicle", titles)
         self.assertIn("Water", titles)
-        self.assertIn("Light", titles)
+        self.assertIn("Lights", titles)
         self.assertIn("Energy", titles)
         self.assertIn("Climate", titles)
         self.assertIn("Components", titles)
@@ -278,7 +278,7 @@ class DashboardGenerationTests(unittest.TestCase):
             for card in dashboard_cards
             if card["type"] == "gauge"
         ]
-        self.assertIn("Battery SOC", dashboard_gauge_names)
+        self.assertIn("Leisure Battery", dashboard_gauge_names)
         self.assertNotIn(
             "Grand Canyon S 700 Living Battery State Of Charge",
             dashboard_gauge_names,
@@ -366,7 +366,7 @@ class DashboardGenerationTests(unittest.TestCase):
         ]
         self.assertEqual(
             [card["name"] for card in voltage_graphs],
-            ["Leisure Battery"],
+            ["Leisure Battery Voltage"],
         )
         self.assertFalse(
             any(card.get("title") == "Battery Voltages (24h)" for card in energy_cards)
@@ -380,7 +380,7 @@ class DashboardGenerationTests(unittest.TestCase):
             )
         )
 
-        info_view = next(view for view in config["views"] if view["title"] == "Info")
+        info_view = next(view for view in config["views"] if view["title"] == "Vehicle")
         info_maps = [
             card
             for card in walk_cards(info_view["cards"])
@@ -427,7 +427,7 @@ class DashboardGenerationTests(unittest.TestCase):
             chassis_entities,
         )
 
-        light_view = next(view for view in config["views"] if view["title"] == "Light")
+        light_view = next(view for view in config["views"] if view["title"] == "Lights")
         light_titles = [
             card["title"]
             for card in walk_cards(light_view["cards"])

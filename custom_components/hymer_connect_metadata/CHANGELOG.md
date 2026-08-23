@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0b2] - 2026-08-23
+
+Battery, scenario and dashboard fixes on the 2.0.0 beta (all generic across van
+types).
+
+### Fixed
+
+- **Built-in scenarios now appear.** The scenario catalog is a union across every
+  provider family, so a given vehicle rarely has 100% of a scenario's actions —
+  the old all-or-nothing rule meant *no* scenes were created. A scenario is now
+  exposed when any of its actions are supported on the vehicle, executing that
+  supported subset (e.g. "Good Night" runs the lights/actions your van has).
+- **Battery runtime no longer shows a bogus value.** A BMS "time remaining" of
+  `0x7FFF`/`0xFFFF` minutes (its "not applicable / not discharging" sentinel) now
+  reads as *unavailable* instead of a nonsensical ~22-day figure.
+
+### Changed
+
+- **Clearer battery labels.** On the generated dashboard the leisure battery's
+  charge is the headline "Leisure Battery" (its voltage reads "Leisure Battery
+  Voltage"), with "Leisure Battery Health" and "Vehicle Battery" — so the leisure
+  and vehicle batteries are unambiguous.
+- **Dashboard tabs mirror the HYMER in-van app.** Tab order, titles and icons now
+  follow the app's rail (Energy, Lights, Climate, Water, Components, Vehicle,
+  Scenarios); section names already matched the app's sub-tabs.
+
 ## [2.0.0b1] - 2026-08-23
 
 Beta / pre-release. Major feature: the integration can now build its own runtime

@@ -488,6 +488,15 @@ class HymerSensor(_HymerSlotEntity, SensorEntity):
         # Sentinel filter — decoded layer removes most, but keep a safety net.
         if isinstance(v, float) and v <= -273:
             return None
+        # BMS "time remaining" reports 0x7FFF / 0xFFFF (in minutes) as "not
+        # applicable" — e.g. when the battery is full or not discharging.
+        # Show it as unavailable rather than a nonsensical ~22-day figure.
+        if (
+            self._meta.unit == "min"
+            and isinstance(v, (int, float))
+            and int(v) in (32767, 65535)
+        ):
+            return None
         return display_value(v, self._meta.unit, self._entry)
 
 

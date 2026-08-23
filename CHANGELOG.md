@@ -6,7 +6,7 @@ The authoritative integration changelog lives in:
 
 Current repository state:
 
-- `2.0.0b1` (beta) — **the integration can build its own runtime metadata from a
+- `2.0.0b2` (beta) — **the integration can build its own runtime metadata from a
   HYMER APK, inside Home Assistant, with no external toolchain.** A pure-Python
   Hermes-bytecode reader reconstructs the catalog object literals (including
   nested ranges, enum options and scenario actions) and the OAuth client

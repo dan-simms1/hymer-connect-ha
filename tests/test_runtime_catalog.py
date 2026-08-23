@@ -98,7 +98,7 @@ class RuntimeCatalogTests(unittest.TestCase):
         self.assertEqual(slots["30:4"]["support_class"], "canonical_generic")
         self.assertEqual(slots["30:5"]["support_class"], "canonical_generic")
 
-    def test_resolved_scenarios_require_full_supported_action_set(self) -> None:
+    def test_resolved_scenarios_expose_supported_action_subset(self) -> None:
         entry = next(
             candidate
             for candidate in catalog.scenario_catalog()
@@ -108,12 +108,30 @@ class RuntimeCatalogTests(unittest.TestCase):
             (action["component_id"], action["sensor_id"])
             for action in entry["actions"]
         }
+
+        # No matching slots -> the scenario is not exposed.
+        self.assertEqual(catalog.resolved_scenarios(set()), [])
+
+        # Some matching slots -> exposed, running only the supported subset. The
+        # catalog is a union across van types, so partial support is the norm.
         partial_slots = {next(iter(all_slots))}
+        partial = [
+            item
+            for item in catalog.resolved_scenarios(partial_slots)
+            if item["key"] == "GOOD_MORNING"
+        ]
+        self.assertTrue(partial)
+        self.assertGreaterEqual(len(partial[0]["actions"]), 1)
+        self.assertLess(len(partial[0]["actions"]), len(entry["actions"]))
 
-        self.assertEqual(catalog.resolved_scenarios(partial_slots), [])
-
-        resolved = catalog.resolved_scenarios(all_slots)
-        self.assertTrue(any(item["key"] == "GOOD_MORNING" for item in resolved))
+        # All slots present -> every action is supported.
+        full = [
+            item
+            for item in catalog.resolved_scenarios(all_slots)
+            if item["key"] == "GOOD_MORNING"
+        ]
+        self.assertTrue(full)
+        self.assertEqual(len(full[0]["actions"]), len(entry["actions"]))
 
     def test_canonical_claims_only_the_selected_provider_slot(self) -> None:
         observed = {(3, 8), (2, 8)}

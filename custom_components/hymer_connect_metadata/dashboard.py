@@ -17,36 +17,39 @@ import yaml
 
 from .discovery import component_meta, slot_meta
 
+# Titles / icons / order mirror the HYMER in-van app's tab rail so the generated
+# dashboard feels native across every van type (the sub-section names already
+# match the app's sub-tabs, e.g. Communal/Personal/Outside lights).
 APP_TAB_TITLES: dict[str, str] = {
     "dashboard": "Dashboard",
-    "info": "Info",
-    "water": "Water",
-    "light": "Light",
     "energy": "Energy",
+    "light": "Lights",
     "climate": "Climate",
+    "water": "Water",
     "components": "Components",
+    "info": "Vehicle",
     "scenarios": "Scenarios",
 }
 
 APP_TAB_ICONS: dict[str, str] = {
     "dashboard": "mdi:view-dashboard-outline",
-    "info": "mdi:information-outline",
-    "water": "mdi:water-outline",
-    "light": "mdi:lightbulb-group-outline",
-    "energy": "mdi:flash-outline",
-    "climate": "mdi:thermometer-lines",
-    "components": "mdi:fridge-outline",
-    "scenarios": "mdi:play-box-outline",
+    "energy": "mdi:lightning-bolt",
+    "light": "mdi:lightbulb-group",
+    "climate": "mdi:thermometer",
+    "water": "mdi:water",
+    "components": "mdi:package-variant-closed",
+    "info": "mdi:rv-truck",
+    "scenarios": "mdi:play-circle-outline",
 }
 
 APP_TAB_ORDER: tuple[str, ...] = (
     "dashboard",
-    "info",
-    "water",
-    "light",
     "energy",
+    "light",
     "climate",
+    "water",
     "components",
+    "info",
     "scenarios",
 )
 
@@ -298,12 +301,12 @@ DASHBOARD_NAME_OVERRIDES: dict[str, str] = {
     "distance_to_service": "Service Due In",
     "adblue_remaining_distance": "AdBlue Range",
     "wiping_water": "Washer Fluid",
-    "battery_soc": "Battery SOC",
-    "battery_state_of_health": "Battery SoH",
+    "battery_soc": "Leisure Battery",
+    "battery_state_of_health": "Leisure Battery Health",
     "fresh_water_level": "Fresh Water",
     "waste_water_level": "Grey Water",
     "black_water_level": "Black Water",
-    "living_battery_voltage": "Leisure Battery",
+    "living_battery_voltage": "Leisure Battery Voltage",
     "starter_battery_voltage": "Vehicle Battery",
     "charge_voltage": "Charge Voltage",
     "scu_voltage": "Smart Unit Voltage",

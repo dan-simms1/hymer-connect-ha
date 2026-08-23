@@ -201,7 +201,11 @@ def resolved_scenarios(observed_slots: set[tuple[int, int]]) -> list[dict[str, A
     resolved: list[dict[str, Any]] = []
     for entry in scenario_availability(observed_slots):
         supported_actions = entry.get("supported_actions", [])
-        if not entry.get("executable_for_vehicle") or not supported_actions:
+        # The scenario catalog is a UNION across every provider family, so a
+        # given vehicle almost never has 100% of a scenario's actions. Expose a
+        # scenario when ANY of its actions are supported here and run that
+        # subset (unsupported actions target hardware this van doesn't have).
+        if not supported_actions:
             continue
         resolved.append(
             {
