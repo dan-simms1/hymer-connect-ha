@@ -116,46 +116,25 @@ def _check_zip_bounds(fh) -> None:
     """Reject a central-directory bomb before ``ZipFile`` parses the archive.
 
     ``ZipFile`` reads central-directory records across the declared directory
-    *size* (not the declared entry count), so both are bounded: each record is at
-    least ``_MIN_CENTRAL_DIR_RECORD`` bytes, so ``size_cd // 46`` is the true
-    upper bound on the ZipInfo objects it will allocate. A malicious archive that
-    under-declares its count is therefore still caught by the size bound.
+    *size* (not the declared entry count), and it derives that size through its
+    own end-of-directory parser -- including the version-specific ZIP64 rules.
+    Rather than re-implement (and drift from) that logic, we call the very same
+    parser to obtain the exact size ``ZipFile`` will use; parsing the EOCD does
+    not read the central directory, so no ZipInfo is allocated here. Each record
+    is at least ``_MIN_CENTRAL_DIR_RECORD`` bytes, so ``size_cd // 46`` is the
+    upper bound on the ZipInfo objects ``ZipFile`` would then allocate.
     """
-    fh.seek(0, io.SEEK_END)
-    size = fh.tell()
-    scan = min(size, 65557)  # 22-byte EOCD + up to a 65535-byte comment
-    fh.seek(size - scan)
-    tail = fh.read(scan)
-    idx = tail.rfind(b"PK\x05\x06")
-    if idx < 0:
-        raise OAuthExtractionError("not a valid APK (no zip end-of-directory record)")
-    total = struct.unpack_from("<H", tail, idx + 10)[0]
-    size_cd = struct.unpack_from("<I", tail, idx + 12)[0]
-
-    # ZipFile uses a ZIP64 record whenever a locator sits in the 20 bytes
-    # IMMEDIATELY before the EOCD -- positionally, not gated on the legacy
-    # 0xFFFF/0xFFFFFFFF sentinels -- so mirror that exactly, otherwise an archive
-    # could declare tiny legacy values here yet make ZipFile read a large ZIP64
-    # directory.
-    eocd_abs = (size - scan) + idx
-    loc_abs = eocd_abs - 20
-    if loc_abs >= 0:
-        fh.seek(loc_abs)
-        loc = fh.read(20)
-        if len(loc) == 20 and loc[:4] == b"PK\x06\x07":
-            # ZipFile reads the fixed 56-byte ZIP64 EOCD immediately BEFORE the
-            # locator (it ignores the locator's relative-offset field), so read
-            # it at exactly that position -- otherwise the locator could point at
-            # a benign record while ZipFile reads a large one here.
-            z64_abs = loc_abs - 56
-            if z64_abs < 0:
-                raise OAuthExtractionError("invalid ZIP64 end-of-directory record")
-            fh.seek(z64_abs)
-            z64 = fh.read(56)
-            if len(z64) < 48 or z64[:4] != b"PK\x06\x06":
-                raise OAuthExtractionError("invalid ZIP64 end-of-directory record")
-            total = struct.unpack_from("<Q", z64, 32)[0]
-            size_cd = struct.unpack_from("<Q", z64, 40)[0]
+    fh.seek(0)
+    try:
+        endrec = zipfile._EndRecData(fh)
+    except zipfile.BadZipFile as err:
+        raise OAuthExtractionError("not a valid APK (bad zip)") from err
+    if not endrec:
+        raise OAuthExtractionError(
+            "not a valid APK (no zip end-of-directory record)"
+        )
+    total = endrec[zipfile._ECD_ENTRIES_TOTAL]
+    size_cd = endrec[zipfile._ECD_SIZE]
     if (
         total > _MAX_ZIP_ENTRIES
         or size_cd // _MIN_CENTRAL_DIR_RECORD > _MAX_ZIP_ENTRIES

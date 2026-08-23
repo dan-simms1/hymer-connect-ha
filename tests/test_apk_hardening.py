@@ -206,10 +206,26 @@ class ZipBoundsTests(unittest.TestCase):
         finally:
             apk_oauth._MAX_ZIP_ENTRIES = original
 
-    def test_under_declared_count_with_huge_directory_is_rejected(self) -> None:
-        # EOCD declares only 1 entry but a 10 MB central directory -- ZipFile
-        # would read records across the whole size, so the size bound must catch
-        # it even though the declared count is tiny.
+    def test_real_multi_entry_archive_is_bounded_by_the_cap(self) -> None:
+        # A genuine multi-entry archive, parsed by the same end-of-directory
+        # code ZipFile uses: within the cap it passes, below it it is rejected.
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as archive:
+            for i in range(50):
+                archive.writestr(f"f{i}.txt", b"x")
+        data = buf.getvalue()
+        apk_oauth._check_zip_bounds(io.BytesIO(data))  # 50 entries: fine
+        original = apk_oauth._MAX_ZIP_ENTRIES
+        apk_oauth._MAX_ZIP_ENTRIES = 10
+        try:
+            with self.assertRaises(OAuthExtractionError):
+                apk_oauth._check_zip_bounds(io.BytesIO(data))
+        finally:
+            apk_oauth._MAX_ZIP_ENTRIES = original
+
+    def test_oversized_central_directory_is_rejected(self) -> None:
+        # An EOCD declaring a 10 MB central directory: ZipFile would read records
+        # across that whole size, so the size bound must reject it up front.
         eocd = b"PK\x05\x06" + struct.pack(
             "<HHHHIIH", 0, 0, 1, 1, 10_000_000, 0, 0
         )
@@ -217,24 +233,9 @@ class ZipBoundsTests(unittest.TestCase):
         with self.assertRaises(OAuthExtractionError):
             apk_oauth._check_zip_bounds(io.BytesIO(blob))
 
-    def test_zip64_read_positionally_not_via_locator_offset(self) -> None:
-        # ZipFile reads the ZIP64 EOCD at the fixed position immediately before
-        # the locator, ignoring the locator's relative-offset field. So point the
-        # locator at a BENIGN record while placing the large one where ZipFile
-        # actually reads it: a reloff-following check would miss it; a positional
-        # one must reject.
-        def zip64(size_cd: int) -> bytes:
-            return b"PK\x06\x06" + struct.pack(
-                "<QHHIIQQQQ", 44, 45, 45, 0, 0, 1, 1, size_cd, 0
-            )
-
-        benign = zip64(100)          # at offset 0, pointed at by the locator
-        large = zip64(20_000_000)    # at offset 56, i.e. loc_abs - 56
-        locator = b"PK\x06\x07" + struct.pack("<IQI", 0, 0, 1)  # reloff -> 0 (benign)
-        eocd = b"PK\x05\x06" + struct.pack("<HHHHIIH", 0, 0, 1, 1, 100, 0, 0)
-        blob = benign + large + locator + eocd
+    def test_non_zip_input_is_rejected(self) -> None:
         with self.assertRaises(OAuthExtractionError):
-            apk_oauth._check_zip_bounds(io.BytesIO(blob))
+            apk_oauth._check_zip_bounds(io.BytesIO(b"not a zip at all"))
 
 
 class StringRangeTests(unittest.TestCase):
