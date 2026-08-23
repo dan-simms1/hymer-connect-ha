@@ -217,16 +217,22 @@ class ZipBoundsTests(unittest.TestCase):
         with self.assertRaises(OAuthExtractionError):
             apk_oauth._check_zip_bounds(io.BytesIO(blob))
 
-    def test_zip64_locator_with_small_legacy_fields_is_rejected(self) -> None:
-        # Legacy EOCD fields are tiny (would pass a sentinel-gated check), but a
-        # ZIP64 locator sits immediately before the EOCD pointing at a ZIP64 EOCD
-        # that declares a 20 MB directory -- which is what ZipFile actually uses.
-        zip64 = b"PK\x06\x06" + struct.pack(
-            "<QHHIIQQQQ", 44, 45, 45, 0, 0, 1, 1, 20_000_000, 0
-        )
-        locator = b"PK\x06\x07" + struct.pack("<IQI", 0, 0, 1)  # reloff 0
+    def test_zip64_read_positionally_not_via_locator_offset(self) -> None:
+        # ZipFile reads the ZIP64 EOCD at the fixed position immediately before
+        # the locator, ignoring the locator's relative-offset field. So point the
+        # locator at a BENIGN record while placing the large one where ZipFile
+        # actually reads it: a reloff-following check would miss it; a positional
+        # one must reject.
+        def zip64(size_cd: int) -> bytes:
+            return b"PK\x06\x06" + struct.pack(
+                "<QHHIIQQQQ", 44, 45, 45, 0, 0, 1, 1, size_cd, 0
+            )
+
+        benign = zip64(100)          # at offset 0, pointed at by the locator
+        large = zip64(20_000_000)    # at offset 56, i.e. loc_abs - 56
+        locator = b"PK\x06\x07" + struct.pack("<IQI", 0, 0, 1)  # reloff -> 0 (benign)
         eocd = b"PK\x05\x06" + struct.pack("<HHHHIIH", 0, 0, 1, 1, 100, 0, 0)
-        blob = zip64 + locator + eocd
+        blob = benign + large + locator + eocd
         with self.assertRaises(OAuthExtractionError):
             apk_oauth._check_zip_bounds(io.BytesIO(blob))
 

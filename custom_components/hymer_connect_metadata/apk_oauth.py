@@ -143,10 +143,14 @@ def _check_zip_bounds(fh) -> None:
         fh.seek(loc_abs)
         loc = fh.read(20)
         if len(loc) == 20 and loc[:4] == b"PK\x06\x07":
-            zip64_off = struct.unpack_from("<Q", loc, 8)[0]
-            if zip64_off < 0 or zip64_off + 48 > size:
+            # ZipFile reads the fixed 56-byte ZIP64 EOCD immediately BEFORE the
+            # locator (it ignores the locator's relative-offset field), so read
+            # it at exactly that position -- otherwise the locator could point at
+            # a benign record while ZipFile reads a large one here.
+            z64_abs = loc_abs - 56
+            if z64_abs < 0:
                 raise OAuthExtractionError("invalid ZIP64 end-of-directory record")
-            fh.seek(zip64_off)
+            fh.seek(z64_abs)
             z64 = fh.read(56)
             if len(z64) < 48 or z64[:4] != b"PK\x06\x06":
                 raise OAuthExtractionError("invalid ZIP64 end-of-directory record")
