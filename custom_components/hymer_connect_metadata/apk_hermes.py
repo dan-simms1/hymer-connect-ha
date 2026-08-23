@@ -405,9 +405,12 @@ class _Reader:
 
         instr = 0
         fills = 0
+        raw_len = len(raw)
         for foff, fsize in self._functions():
+            if foff >= raw_len:
+                continue
             regs: dict[int, Any] = {}
-            p, end = foff, foff + fsize
+            p, end = foff, min(foff + fsize, raw_len)
             while p < end:
                 op = raw[p]
                 if op >= len(_OPCODES):
@@ -416,6 +419,10 @@ class _Reader:
                 if instr > _MAX_INSTRUCTIONS:
                     raise HermesLimitError("bundle exceeds the instruction budget")
                 _name, operands, isize = _OPCODES[op]
+                # Never let an instruction's operands read past the function body
+                # (and therefore past the buffer) on a truncated/hostile header.
+                if p + isize > end:
+                    break
                 a = p + 1
                 if op == op_nowb or op == op_nowbl:
                     dst = raw[a]
